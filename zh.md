@@ -22,8 +22,8 @@ NGINX开发指南
     * [Heap](#heap)
     * [Pool](#pool)
     * [Shared memory](#shared-memory)
-* [Logging](#logging)
-* [Cycle](#cycle)
+* [日志](#日志)
+* [周期](#周期)
 * [Buffer](#buffer)
 * [Networking](#networking)
     * [Connection](#connection)
@@ -471,10 +471,47 @@ Shared memory
 -------------
 TODO
 
-Logging
+日志
 =======
 
-Cycle
+nginx用ngx_log_t对象记录日志。nginx的日志提供以下几种方式：
+
+* stderr — 记录到标准错误输出
+* file — 记录到文件
+* syslog — 记录到syslog
+* memory — 记录到内部内存用于开发的目的。这块内存可以在debugger时访问。
+
+一个日志实例可以是一个日志对象链接，每个通过next连接起来。每个消息都被写到所有的日志对象。
+
+每个日志对象有错误级别，用于限制消息写到它自己。以下是nginx提供的几种错误级别：
+
+* NGX_LOG_EMERG
+* NGX_LOG_ALERT
+* NGX_LOG_CRIT
+* NGX_LOG_ERR
+* NGX_LOG_WARN
+* NGX_LOG_NOTICE
+* NGX_LOG_INFO
+* NGX_LOG_DEBUG
+
+对于调试日志，有以下几种选项：
+
+* NGX_LOG_DEBUG_CORE
+* NGX_LOG_DEBUG_ALLOC
+* NGX_LOG_DEBUG_MUTEX
+* NGX_LOG_DEBUG_EVENT
+* NGX_LOG_DEBUG_HTTP
+* NGX_LOG_DEBUG_MAIL
+* NGX_LOG_DEBUG_STREAM
+
+通常而言，日志是通过error_log指令创建的，并且在各个阶段都有效，cycle, 配置解析, 客户端连接和其它。
+
+nginx提供以下的日志宏：
+
+* ngx_log_error(level, log, err, fmt, ...) — 记录错误
+* ngx_log_debug0(level, log, err, fmt), ngx_log_debug1(level, log, err, fmt, arg1) etc — 调试日志，提供最多8个可格式化的参数。
+
+周期
 =====
 
 Buffer
