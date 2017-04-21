@@ -33,11 +33,11 @@ NGINX开发指南
     * [Timer events](#timer-events)
     * [Posted events](#posted-events)
     * [Event loop](#event-loop)
-* [Processes](#processes)
-* [Modules](#modules)
-    * [Adding new modules](#adding-new-modules)
-    * [Core modules](#core-modules)
-    * [Configuration directives](#configuration-directives)
+* [进程](#进程)
+* [模块](#模块)
+    * [添加新模块](#添加新模块)
+    * [核心模块](#核心模块)
+    * [配置指令](#配置指令)
 * [HTTP](#hTTP)
     * [Connection](#connection)
     * [Request](#request)
@@ -510,10 +510,38 @@ Event loop
 ----------
 TODO
 
-Processes
+进程
 =========
 
-Modules
+nginx有好几种进程类型。当前进程的类型保存在ngx_process这个全局变量。
+
+* NGX_PROCESS_MASTER — 主进程运行ngx_master_process_cycle()这个函数。主进程不能有任何的I/O，并且只对信号响应。它读取配置，创建cycle，启动和控制子进程。
+
+* NGX_PROCESS_WORKER — 工作进程运行ngx_worker_process_cycle()函数。工作进程由子进程创建，处理客户端连接。他们同样也响应来自主进程的信号。
+
+* NGX_PROCESS_SINGLE — 单进程只存在于master_process模式模式的情况下。生命周期函数是ngx_single_process_cycle()。这个进程创建生命周期并且处理客户端连接。
+
+* NGX_PROCESS_HELPER — 目前只有两种help进程：cache manager 和 cache loader. 它们共用同样的生命周期函数ngx_cache_manager_process_cycle()。
+
+所有的nginx处理如下信号：
+
+* NGX_SHUTDOWN_SIGNAL (SIGQUIT) — 优雅结束。收到此信号后主进程发送 shutdown 信号给所有的子进程。当没有任何子进程时，主进程释放生命周期内存池然后结束。工作进程收到此信号后，关闭所有的监听端口然后一直等到超时树为空，最后释放生命周期内存池并且结束。cache 管理进程收到这个信号后立马退出。收到信号后 ngx_quit 设置为0，然后在处理完成后立马重置。ngx_exiting 在工作进程处理退出状态时设置为1。
+
+* NGX_TERMINATE_SIGNAL (SIGTERM) - 终止。. 收到此信号后主进程发送 terminate 信号给所有的子进程。如果子进程1秒内没结束，它们会通过SIGKILL 信号被杀掉。当没有任何子进程时，主进程释放生命周期内存池然后结束。工作进程或cache管理进程释放生命周期内存池并且结束。ngx_terminate 在收到结信号后设置为1.
+
+* NGX_NOACCEPT_SIGNAL (SIGWINCH) - 优雅结束工作进程。
+
+* NGX_RECONFIGURE_SIGNAL (SIGHUP) - 配置热加载。 收到此信号后主进程根据配置文件创建新的cycle。如果这个新的cycle被成功的创建了，旧的cycle会被删除并且启动新的子进程。同时旧进程会被到 shutdown 信号。在单进程模式下，nginx 同样创建新的cycle，但是旧的会一直保留到所有跟它关联的连接都结束了。工作进程和helper进程忽略这种信号。
+
+* NGX_REOPEN_SIGNAL (SIGUSR1) — 重新打开文件。主进程发送这个信号给工作进程。工作进程重新打开来自cycle的open_files。
+
+* NGX_CHANGEBIN_SIGNAL (SIGUSR2) — 更新可执行程序。主进程启动新的可执行程序，将所有的监听文件描述符传给它。这些列表是通过环境变量“NGINX” 传递的，描述符值以分号分隔。新的nginx实例读这个变量然后将socket描述符添加到自己的初始cycle。其它进程忽略这种信号。
+
+虽然nginx工作进程可以接受和处理POSIX信号，但是主进程却不通过调用标准kill()给工作进程和help进程发送信号。nginx通过内部进程间通道发送消息。即使这样，目前nginx也只是从主进程给工作进程发送消息。这些消息携带同样的信号。这些通过是socketpairs，其对端在不同的进程。
+
+当运行可执行程序，可以通过-s参数指定几种值。分别是 stop, quit, reopen, reload。它们被转化成信号 NGX_TERMINATE_SIGNAL, NGX_SHUTDOWN_SIGNAL, NGX_REOPEN_SIGNAL 和 NGX_RECONFIGURE_SIGNAL 并且被发送给nginx主进程，通过从nginx pid文件获取进程id。
+
+模块
 =======
 
 添加新模块

@@ -513,16 +513,324 @@ TODO
 Processes
 =========
 
+There are several types of processes in nginx. The type of current process is kept in the ngx_process global variable:
+
+* NGX_PROCESS_MASTER — the master process runs the ngx_master_process_cycle() function. Master process does not have any I/O and responds only to signals. It reads configuration, creates cycles, starts and controls child processes
+
+* NGX_PROCESS_WORKER — the worker process runs the ngx_worker_process_cycle() function. Worker processes are started by master and handle client connections. They also respond to signals and channel commands, sent from master
+
+* NGX_PROCESS_SINGLE — single process is the only type of processes which exist in the master_process off mode. The cycle function for this process is ngx_single_process_cycle(). This process creates cycles and handles client connections
+
+* NGX_PROCESS_HELPER — currently, there are two types of helper processes: cache manager and cache loader. Both of them share the same cycle function ngx_cache_manager_process_cycle().
+
+All nginx processes handle the following signals:
+
+* NGX_SHUTDOWN_SIGNAL (SIGQUIT) — graceful shutdown. Upon receiving this signal master process sends shutdown signal to all child processes. When no child processes are left, master destroys cycle pool and exits. A worker process which received this signal, closes all listening sockets and waits until timeout tree becomes empty, then destroys cycle pool and exits. A cache manager process exits right after receiving this signal. The variable ngx_quit is set to one after receiving this signal and immediately reset after being processed. The variable ngx_exiting is set to one when worker process is in shutdown state
+
+* NGX_TERMINATE_SIGNAL (SIGTERM) - terminate. Upon receiving this signal master process sends terminate signal to all child processes. If child processes do not exit in 1 second, they are killed with the SIGKILL signal. When no child processes are left, master process destroys cycle pool and exits. A worker or cache manager process which received this signal destroys cycle pool and exits. The variable ngx_terminate is set to one after receiving this signal
+
+* NGX_NOACCEPT_SIGNAL (SIGWINCH) - gracefully shut down worker processes
+
+* NGX_RECONFIGURE_SIGNAL (SIGHUP) - reconfigure. Upon receiving this signal master process creates a new cycle from configuration file. If the new cycle was created successfully, the old cycle is deleted and new child processes are started. Meanwhile, the old processes receive the shutdown signal. In single-process mode, nginx creates a new cycle as well, but keeps the old one until all clients, tied to the old cycle, are gone. Worker and helper processes ignore this signal
+
+* NGX_REOPEN_SIGNAL (SIGUSR1) — reopen files. Master process passes this signal to workers. Worker processes reopen all open_files from the cycle
+
+* NGX_CHANGEBIN_SIGNAL (SIGUSR2) — change nginx binary. Master process starts a new nginx binary and passes there a list of all listen sockets. The list is passed in the environment variable “NGINX” in text format, where descriptor numbers separated with semicolons. A new nginx instance reads that variable and adds the sockets to its init cycle. Other processes ignore this signal
+
+While all nginx worker processes are able to receive and properly handle POSIX signals, master process normally does not pass any signals to workers and helpers with the standard kill() syscall. Instead, nginx uses inter-process channels which allow sending messages between all nginx processes. Currently, however, messages are only sent from master to its children. Those messages carry the same signals. The channels are socketpairs with their ends in different processes.
+
+When running nginx binary, several values can be specified next to -s parameter. Those values are stop, quit, reopen, reload. They are converted to signals NGX_TERMINATE_SIGNAL, NGX_SHUTDOWN_SIGNAL, NGX_REOPEN_SIGNAL and NGX_RECONFIGURE_SIGNAL and sent to the nginx master process, whose pid is read from nginx pid file.
+
 Modules
 =======
 
 Adding new modules
 ------------------
-TODO
+
+The standalone nginx module resides in a separate directory that contains at least two files: config and a file with the module source. The first file contains all information needed for nginx to integrate the module, for example:
+
+```
+ngx_module_type=CORE
+ngx_module_name=ngx_foo_module
+ngx_module_srcs="$ngx_addon_dir/ngx_foo_module.c"
+
+. auto/module
+
+ngx_addon_name=$ngx_module_name
+```
+
+The file is a POSIX shell script and it can set (or access) the following variables:
+
+* ngx_module_type — the type of module to build. Possible options are CORE, HTTP, HTTP_FILTER, HTTP_INIT_FILTER, HTTP_AUX_FILTER, MAIL, STREAM, or MISC
+* ngx_module_name — the name of the module. A whitespace separated values list is accepted and may be used to build multiple modules from a single set of source files. The first name indicates the name of the output binary for a dynamic module. The names in this list should match the names used in the module.
+* ngx_addon_name — supplies the name of the module in the console output text of the configure script.
+* ngx_module_srcs — a whitespace separated list of source files used to compile the module. The $ngx_addon_dir variable can be used as a placeholder for the path of the module source.
+* ngx_module_incs — include paths required to build the module
+* ngx_module_deps — a list of module's header files.
+* ngx_module_libs — a list of libraries to link with the module. For example, libpthread would be linked using ngx_module_libs=-lpthread. The following macros can be used to link against the same libraries as nginx: LIBXSLT, LIBGD, GEOIP, PCRE, OPENSSL, MD5, SHA1, ZLIB, and PERL
+* ngx_module_link — set by the build system to DYNAMIC for a dynamic module or ADDON for a static module and used to perform different actions depending on linking type.
+ngx_module_order — sets the load order for the module which is useful for HTTP_FILTER and HTTP_AUX_FILTER module types. The order is stored in a reverse list.
+
+    The ngx_http_copy_filter_module is near the bottom of the list so is one of the first to be executed. This reads the data for other filters. Near the top of the list is ngx_http_write_filter_module which writes the data out and is one of the last to be executed.
+
+    The format for this option is typically the current module’s name followed by a whitespace separated list of modules to insert before, and therefore execute after. The module will be inserted before the last module in the list that is found to be currently loaded.
+
+    By default for filter modules this is set to “ngx_http_copy_filter” which will insert the module before the copy filter in the list and therefore will execute after the copy filter. For other module types the default is empty.
+
+A module can be added to nginx by means of the configure script using --add-module=/path/to/module for static compilation and --add-dynamic-module=/path/to/module for dynamic compilation.
+
+Modules are building blocks of nginx, and most of its functionality is implemented as modules. The module source file must contain a global variable of ngx_module_t type which is defined as follows:
+
+```
+struct ngx_module_s {
+
+    /* private part is omitted */
+
+    void                 *ctx;
+    ngx_command_t        *commands;
+    ngx_uint_t            type;
+
+    ngx_int_t           (*init_master)(ngx_log_t *log);
+
+    ngx_int_t           (*init_module)(ngx_cycle_t *cycle);
+
+    ngx_int_t           (*init_process)(ngx_cycle_t *cycle);
+    ngx_int_t           (*init_thread)(ngx_cycle_t *cycle);
+    void                (*exit_thread)(ngx_cycle_t *cycle);
+    void                (*exit_process)(ngx_cycle_t *cycle);
+
+    void                (*exit_master)(ngx_cycle_t *cycle);
+
+    /* stubs for future extensions are omitted */
+};
+```
+
+The omitted private part includes module version, signature and is filled using the predefined macro NGX_MODULE_V1.
+
+Each module keeps its private data in the ctx field, recognizes specific configuration directives, specified in the commands array, and may be invoked at certain stages of nginx lifecycle. The module lifecycle consists of the following events:
+
+* Configuration directive handlers are called as they appear in configuration files in the context of the master process
+* The init_module handler is called in the context of the master process after the configuration is parsed successfully
+* The master process creates worker process(es) and init_process handler is called in each of them
+* When a worker process receives the shutdown command from master, it invokes the exit_process handler
+* The master process calls the exit_master handler before exiting.
+
+init_module handler may be called multiple times in the master process if the configuration reload is requested.
+
+The init_master, init_thread and exit_thread handlers are not implemented at the moment; Threads in nginx are only used as supplementary I/O facility with its own API and init_master handler looks unnecessary.
+
+The module type defines what exactly is stored in the ctx field. There are several types of modules:
+
+* NGX_CORE_MODULE
+* NGX_EVENT_MODULE
+* NGX_HTTP_MODULE
+* NGX_MAIL_MODULE
+* NGX_STREAM_MODULE
+
+The NGX_CORE_MODULE is the most basic and thus the most generic and most low-level type of module. Other module types are implemented on top of it and provide more convenient way to deal with corresponding problem domains, like handling events or http requests.
+
+The examples of core modules are ngx_core_module, ngx_errlog_module, ngx_regex_module, ngx_thread_pool_module, ngx_openssl_module modules and, of course, http, stream, mail and event modules itself. The context of a core module is defined as:
+
+```
+typedef struct {
+    ngx_str_t             name;
+    void               *(*create_conf)(ngx_cycle_t *cycle);
+    char               *(*init_conf)(ngx_cycle_t *cycle, void *conf);
+} ngx_core_module_t;
+```
+
+where the name is a string with a module name for convenience, create_conf and init_conf are pointers to functions that create and initialize module configuration correspondingly. For core modules, nginx will call create_conf before parsing a new configuration and init_conf after all configuration was parsed successfully. The typical create_conf function allocates memory for the configuration and sets default values. The init_conf deals with known configuration and thus may perform sanity checks and complete initialization.
+
+For example, the simplistic ngx_foo_module can look like this:
+
+```
+/*
+ * Copyright (C) Author.
+ */
+
+
+#include <ngx_config.h>
+#include <ngx_core.h>
+
+
+typedef struct {
+    ngx_flag_t  enable;
+} ngx_foo_conf_t;
+
+
+static void *ngx_foo_create_conf(ngx_cycle_t *cycle);
+static char *ngx_foo_init_conf(ngx_cycle_t *cycle, void *conf);
+
+static char *ngx_foo_enable(ngx_conf_t *cf, void *post, void *data);
+static ngx_conf_post_t  ngx_foo_enable_post = { ngx_foo_enable };
+
+
+static ngx_command_t  ngx_foo_commands[] = {
+
+    { ngx_string("foo_enabled"),
+      NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      0,
+      offsetof(ngx_foo_conf_t, enable),
+      &ngx_foo_enable_post },
+
+      ngx_null_command
+};
+
+
+static ngx_core_module_t  ngx_foo_module_ctx = {
+    ngx_string("foo"),
+    ngx_foo_create_conf,
+    ngx_foo_init_conf
+};
+
+
+ngx_module_t  ngx_foo_module = {
+    NGX_MODULE_V1,
+    &ngx_foo_module_ctx,                   /* module context */
+    ngx_foo_commands,                      /* module directives */
+    NGX_CORE_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+
+static void *
+ngx_foo_create_conf(ngx_cycle_t *cycle)
+{
+    ngx_foo_conf_t  *fcf;
+
+    fcf = ngx_pcalloc(cycle->pool, sizeof(ngx_foo_conf_t));
+    if (fcf == NULL) {
+        return NULL;
+    }
+
+    fcf->enable = NGX_CONF_UNSET;
+
+    return fcf;
+}
+
+
+static char *
+ngx_foo_init_conf(ngx_cycle_t *cycle, void *conf)
+{
+    ngx_foo_conf_t *fcf = conf;
+
+    ngx_conf_init_value(fcf->enable, 0);
+
+    return NGX_CONF_OK;
+}
+
+
+static char *
+ngx_foo_enable(ngx_conf_t *cf, void *post, void *data)
+{
+    ngx_flag_t  *fp = data;
+
+    if (*fp == 0) {
+        return NGX_CONF_OK;
+    }
+
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Foo Module is enabled");
+
+    return NGX_CONF_OK;
+}
+```
+
 
 Core modules
 ------------
-TODO
+
+The ngx_command_t describes single configuration directive. Each module, supporting configuration, provides an array of such specifications that describe how to process arguments and what handlers to call:
+
+```
+struct ngx_command_s {
+    ngx_str_t             name;
+    ngx_uint_t            type;
+    char               *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+    ngx_uint_t            conf;
+    ngx_uint_t            offset;
+    void                 *post;
+};
+```
+
+The array should be terminated by a special value “ngx_null_command”. The name is the literal name of a directive, as it appears in configuration file, for example “worker_processes” or “listen”. The type is a bitfield that controls number of arguments, command type and other properties using corresponding flags. Arguments flags:
+
+* NGX_CONF_NOARGS — directive without arguments
+* NGX_CONF_1MORE — one required argument
+* NGX_CONF_2MORE — two required arguments
+* NGX_CONF_TAKE1..7 — exactly 1..7 arguments
+* NGX_CONF_TAKE12, 13, 23, 123, 1234 — one or two arguments, or other combinations
+
+Directive types:
+
+* NGX_CONF_BLOCK — the directive is a block, i.e. it may contain other directives in curly braces, or even implement its own parser to handle contents inside.
+* NGX_CONF_FLAG — the directive value is a flag, a boolean value represented by “on” or “off” strings.
+
+Context of a directive defines where in the configuration it may appear and how to access module context to store corresponding values:
+
+* NGX_MAIN_CONF — top level configuration
+* NGX_HTTP_MAIN_CONF — in the http block
+* NGX_HTTP_SRV_CONF — in the http server block
+* NGX_HTTP_LOC_CONF — in the http location
+* NGX_HTTP_UPS_CONF — in the http upstream block
+* NGX_HTTP_SIF_CONF — in the http server “if”
+* NGX_HTTP_LIF_CONF — in the http location “if”
+* NGX_HTTP_LMT_CONF — in the http “limit_except”
+* NGX_STREAM_MAIN_CONF — in the stream block
+* NGX_STREAM_SRV_CONF — in the stream server block
+* NGX_STREAM_UPS_CONF — in the stream upstream block
+* NGX_MAIL_MAIN_CONF — in the the mail block
+* NGX_MAIL_SRV_CONF — in the mail server block
+* NGX_EVENT_CONF — in the event block
+* NGX_DIRECT_CONF — used by modules that don't create a hierarchy of contexts and store module configuration directly in ctx
+
+The configuration parser uses this flags to throw an error in case of a misplaced directive and calls directive handlers supplied with a proper configuration pointer, so that same directives in different locations could store their values in distinct places.
+
+The set field defines a handler that processes a directive and stores parsed values into corresponding configuration. Nginx offers a convenient set of functions that perform common conversions:
+
+* ngx_conf_set_flag_slot — converts literal “on” or “off” strings into ngx_flag_t type with values 1 or 0
+* ngx_conf_set_str_slot — stores string as a value of the ngx_str_t type
+* ngx_conf_set_str_array_slot — appends ngx_array_t of ngx_str_t with a new value. The array is created if not yet exists
+* ngx_conf_set_keyval_slot — appends ngx_array_t of ngx_keyval_t with a new value, where key is the first string and value is second. The array is created if not yet exists
+* ngx_conf_set_num_slot — converts directive argument to a ngx_int_t value
+* ngx_conf_set_size_slot — converts size to size_t value in bytes
+* ngx_conf_set_off_slot — converts offset to off_t value in bytes
+* ngx_conf_set_msec_slot — converts time to ngx_msec_t value in milliseconds
+* ngx_conf_set_sec_slot — converts time to time_t value in seconds
+* ngx_conf_set_bufs_slot — converts two arguments into ngx_bufs_t that holds ngx_int_t number and size of buffers
+* ngx_conf_set_enum_slot — converts argument into ngx_uint_t value. The null-terminated array of ngx_conf_enum_t passed in the post field defines acceptable strings and corresponding integer values
+* ngx_conf_set_bitmask_slot — arguments are converted to ngx_uint_t value and OR'ed with the resulting value, forming a bitmask. The null-terminated array of ngx_conf_bitmask_t passed in the post field defines acceptable strings and corresponding mask values
+* set_path_slot — converts arguments to ngx_path_t type and performs all required initializations. See the proxy_temp_path directive description for details
+* set_access_slot — converts arguments to file permissions mask. See the proxy_store_access directive description for details
+
+The conf field defines which context is used to store the value of the directive, or zero if contexts are not used. Only simple core modules use configuration without context and set NGX_DIRECT_CONF flag. In real life, such modules like http or stream require more sophisticated configuration that can be applied per-server or per-location, or even more precisely, in the context of the “if” directive or some limit. In this modules, configuration structure is more complex. Please refer to corresponding modules description to understand how they manage their configuration.
+
+* NGX_HTTP_MAIN_CONF_OFFSET — http block configuration
+* NGX_HTTP_SRV_CONF_OFFSET — http server configuration
+* NGX_HTTP_LOC_CONF_OFFSET — http location configuration
+* NGX_STREAM_MAIN_CONF_OFFSET — stream block configuration
+* NGX_STREAM_SRV_CONF_OFFSET — stream server configuration
+* NGX_MAIL_MAIN_CONF_OFFSET — mail block configuration
+* NGX_MAIL_SRV_CONF_OFFSET — mail server configuration
+
+The offset defines an offset of a field in a module configuration structure that holds values of this particular directive. The typical use is to employ offsetof() macro.
+
+he post is a twofold field: it may be used to define a handler to be called after main handler completed or to pass additional data to the main handler. In the first case, ngx_conf_post_t structure needs to be initialized with a pointer to handler, for example:
+
+```
+static char *ngx_do_foo(ngx_conf_t *cf, void *post, void *data);
+static ngx_conf_post_t  ngx_foo_post = { ngx_do_foo };
+```
+
+The post argument is the ngx_conf_post_t object itself, and the data is a pointer to value, converted from arguments by the main handler with the appropriate type.
+
 
 Configuration directives
 ------------------------
