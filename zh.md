@@ -25,14 +25,14 @@ NGINX开发指南
     * [共享内存](#共享内存)
 * [日志](#日志)
 * [周期](#周期)
-* [Buffer](#buffer)
+* [缓冲](#缓冲)
 * [网络](#网络)
     * [连接](#连接)
 * [事件](#事件)
     * [事件](#事件)
     * [I/O事件](#I/O事件)
     * [定时器事件](#定时器事件)
-    * [已加事件](#已加事件)
+    * [延迟事件](#延迟事件)
     * [遍历事件](#遍历事件)
 * [进程](#进程)
 * [模块](#模块)
@@ -1010,40 +1010,52 @@ nginx提供以下的日志宏：
 周期
 =====
 
-Buffer
+cycle 对象保持了nginx的运行时上文，由指定的配置创建。cycle的类型是 ngx_cycle_t。在配置重新加载后，新的cycle将从新版的配置创建，而旧的cycle通常在新的成功创建之后删除。目前活动的cycle保存在 ngx_cycle 这个全局变量并且继承自新启动的nginx进程。
+
+cycle 是通过ngx_init_cycle()这个函数创建的。这个函数接收老的cycle作为参数。它用于定位配置并且尽可能多的继承旧的cycle以达到平滑过度。当nginx启动时，模拟的cycle被创建，然后被根据配置的正常cycle替换。
+
+以下是cycle的一些字段：
+
+* pool — cycle内存池。每个新的cycle都会创建一个内存池。
+* log — cycle日志。初始时这个log继承自旧的cycle。当读完配置后，它会指向new_log。
+* new_log - cycle日志。由配置创建。会根据最外层范围的error_log指令的设置而变化。
+* connections, connections_n — 每个工作进程有一个类型为 ngx_connection_t 的数组 connections，由 event 模块在进程初始化时创建。connections的数目由worker_connections指令指定。
+* files, files_n — 将文件描述符映射到nginx连接的数组。这个映射由event模块使用，具有NGX_USE_FD_EVENT标记（当前是poll和devpoll）。
+* conf_ctx — 模块配置数组。这些配置在读nginx配置文件时创建和填充。
+* modules, modules_n — 类型为 ngx_module_t 的模块数组，包括静态和通过当前配置加载的动态模块。
+* listening — 类型为 ngx_listening_t 的监听socket数组。监听对象通常由不同模块的监听指令通过调用ngx_create_listening()函数添加。nginx基于这些监听对象创建监听socket。
+* paths - 类型为 ngx_path_t 的数组。paths由那些想操作指定目录的模块通过调用ngx_add_path()添加。nginx读完配置之后，如果这些目录不存在，nginx会创建它们。些外，两个handler会被加到每个path：
+    * path loader — 只会在nginx启动或配置加载60秒后执行一次。通常读取目录并将数据保存在共享内存里，这个handler由名为“nginx cache loader”的进程调用。
+    * path manager — 定期执行。通常移走目录中旧的文件并将变化重新反映到共享内存里。这个handler由名为“nginx cache manager”的进程调用。
+* open_files — 类型为ngx_open_file_t的列表。一个open file对象通过调用ngx_conf_open_file()创建。nginx读完配置后会根据open_files列表打开文件，并且将文件描述符保存在各自的open file对象的fd字段。这些文件会以追加模块打开，并且如果不存在时创建。nginx的工作进程在收到reopen信号（通常是USR1）后会重新打开被打开。这种情况下fd会变成新的文件描述符。目前这些打开的文件被用于日志。
+* shared_memory — 共享内存zone的列表，通过调用ngx_shared_memory_add()函数添加。在所有nginx进程里，共享内存zone会映射到同样的地址，以共享所有的数据，比如HTTP缓存的in-memory树。
+
+缓冲
 ======
 
-For input/output operations, nginx provides the buffer type ngx_buf_t. Normally, it's used to hold data
- to be written to a destination or read from a source. Buffer can reference data in memory and in file.
- Technically it's possible that a buffer references both at the same time. Memory for the buffer is all
-ocated separately and is not related to the buffer structure ngx_buf_t.
+nginx对 input/output 操作提供了类型为 ngx_buf_t 的buffer。它通常用于保存写入到目的的或从源读的数据。buffer可以将数据指向内存或文件。
+ 技术上来讲同时指向这两种也是可能的。缓冲区的内存是单独创建的，并且不会关联到 ngx_buf_t 这个结构体。
 
-The structure ngx_buf_t has the following fields:
+ngx_buf_t 结构体有以下字段：
 
-* start, end — the boundaries of memory block, allocated for the buffer
-* pos, last — memory buffer boundaries, normally a subrange of start .. end
-* file_pos, file_last — file buffer boundaries, these are offsets from the beginning of the file
-* tag — unique value, used to distinguish buffers, created by different nginx module, usually, for the
-purpose of buffer reuse
-* file — file object
-* temporary — flag, meaning that the buffer references writable memory
-* memory — flag, meaning that the buffer references read-only memory
-* in_file — flag, meaning that current buffer references data in a file
-* flush — flag, meaning that all data prior to this buffer should be flushed
-* recycled — flag, meaning that the buffer can be reused and should be consumed as soon as possible
-* sync — flag, meaning that the buffer carries no data or special signal like flush or last_buf. Normal
-ly, such buffers are considered an error by nginx. This flags allows skipping the error checks
-* last_buf — flag, meaning that current buffer is the last in output
-* last_in_chain — flag, meaning that there's no more data buffers in a (sub)request
-* shadow — reference to another buffer, related to the current buffer. Usually current buffer uses data
- from the shadow buffer. Once current buffer is consumed, the shadow buffer should normally also be mar
-ked as consumed
-* last_shadow — flag, meaning that current buffer is the last buffer, referencing a particular shadow b
-uffer
-* temp_file — flag, meaning that the buffer is in a temporary file
+* start, end — 内存块的边界，分配给这个缓冲区。
+* pos, last — 内存缓冲区边界，一般在 start .. end 以内。
+* file_pos, file_last — 文件缓冲区边界。相对文件开头的偏移量。
+* tag — 唯一值。用于区分buffer，由不同的模块创建，通常是为了buffer复用。
+* file — file对象。
+* temporary — 临时标记。意味着这个buffer指向可写的内存。
+* memory — 内存标记。表示这个buffer指向只读的内存。
+* in_file — 文件村记。表示该当前buffer指向文件的数据。
+* flush — 清空标记。表示应该清空这个buffer之前的所有数据。
+* recycled — 可回收标记。表示该buffer可以被回收，而且应该尽快的使用。
+* sync — 同步标记。表示这个buffer不带任何数据或特殊的像flush, last_buf这样的。一般这样的buffer在nginx里会被认为是错误的，这个标记允许略过错误检查。
+* last_buf — 标记。表示这个buffer是输出的最后一个。
+* last_in_chain — 标记。表示在(子)请求没有更多有数据的buffer了。
+* shadow — 指向另一个buffer，与当前的buffer有关。通常当前buffer使用这个shadow buffer的数据。一量当前buffer使用完了，这个shadow buffer也应该被标记为已使用。
+* last_shadow — 标记。表示当前buffer是最后一个buffer，并且指向特殊的shadow buffer。
+* temp_file — 标记。表示这个buffer是临时文件。
 
-For input and output buffers are linked in chains. Chain is a sequence of chain links ngx_chain_t, defi
-ned as follows:
+输入输出 buffer 连接在一个链里。链是定义为下的一系列 ngx_chain_t 。
 
 ```
 typedef struct ngx_chain_s  ngx_chain_t;
@@ -1054,9 +1066,9 @@ struct ngx_chain_s {
 };
 ```
 
-Each chain link keeps a reference to its buffer and a reference to the next chain link.
+每个链保存着它的buffer，并且指向下一个链。
 
-Example of using buffers and chains:
+使用buffer和chain例子：
 
 ```
 ngx_chain_t *
@@ -1124,7 +1136,7 @@ nginx connection可以透传SSL层。这种情况下connection ssl字段指向�
 
 每个进程的connection数量被限制为 worker_connections 的值。所有的connection结构体会提前创建并且保存在cycle的connections这个字段里。通过 ngx_get_connection(s, log) 获得一个connection结构体。该函数接收socket描述符并且会在connection结构体里作封装。
 
-国为每个进程有connection数的限制，nginx提供了一个抢占connection的方式。通过 ngx_reusable_connection(c, reusable) 允许或禁止connection的复用。调用 ngx_reusable_connection(c, 1) 设置reuse标记并且将connection加入 cycle 的 reusable_connections_queue。每当 ngx_get_connection() 发现 cycle 的 free_connections 无可用的 connection 时，它会调用 ngx_drain_connections() 以释放一定数量的可复用connection。对每个这样的 connection，关闭标记被设置并且读handler被调用以便通过调用ngx_close_connection(c)释放connection，然后将它设置为可复用。当一个connection可复用时可以调用ngx_reusable_connection(c, 0)退出这种状态。举个nginx里connection可复用的例子，在接收客户端的数据之前，HTTP客户端的connection会被标记为可复用。
+国为每个进程有connection数的限制，nginx提供了一个抢占connection的方式。通过 ngx_reusable_connection(c, reusable) 允许或禁止connection的复用。调用 ngx_reusable_connection(c, 1) 设置reuse标记并且将connection加入 cycle 的 reusable_connections_queue。每当 ngx_get_connection() 发现 cycle 的 free_connections 无可用的 connection 时，它会调用 ngx_drain_connections() 以释放一定数量的可复用connection。对每个这样的 connection，关闭标记被设置并且读handler被调用以便通过调用ngx_close_connection(c)释放connection，然后将它设置为可复用。连接处于可复用状态下，调用ngx_reusable_connection(c, 0)可以取消复用。举个nginx里connection可复用的例子，在接收客户端的数据之前，HTTP客户端的connection会被标记为可复用。
 
 
 事件

@@ -972,7 +972,7 @@ Some members of the cycle:
 * free_connections, free_connections_n — the and number of currently available connections. If no connections are available, nginx worker refuses to accept new clients
 * files, files_n — array for mapping file descriptors to nginx connections. This mapping is used by the event modules, having the NGX_USE_FD_EVENT flag (currently, it's poll and devpoll)
 * conf_ctx — array of core module configurations. The configurations are created and filled while reading nginx configuration files
-modules, modules_n — array of modules ngx_module_t, both static and dynamic, loaded by current configuration
+* modules, modules_n — array of modules ngx_module_t, both static and dynamic, loaded by current configuration
 * listening — array of listening objects ngx_listening_t. Listening objects are normally added by the the listen directive of different modules which call the ngx_create_listening() function. Based on listening objects, listen sockets are created by nginx
 * paths — array of paths ngx_path_t. Paths are added by calling the function ngx_add_path() from modules which are going to operate on certain directories. These directories are created by nginx after reading configuration, if missing. Moreover, two handlers can be added for each path:
     * path loader — executed only once in 60 seconds after starting or reloading nginx. Normally, reads the directory and stores data in nginx shared memory. The handler is called from a dedicated nginx process “nginx cache loader”
