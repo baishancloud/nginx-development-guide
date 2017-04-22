@@ -1780,47 +1780,945 @@ Some phases treat return codes in a slightly different way. At content phase, an
 
 Variables
 ---------
-TODO
+
+Accessing existing variables
+----------------------------
+
+Variables may be referenced using index (this is the most common method) or names (see below in the section about creating variables). Index is created at configuration stage, when a variable is added to configuration. The variable index can be obtained using ngx_http_get_variable_index():
+
+```
+ngx_str_t  name;  /* ngx_string("foo") */
+ngx_int_t  index;
+
+index = ngx_http_get_variable_index(cf, &name);
+```
+
+Here, the cf is a pointer to nginx configuration and the name points to a string with the variable name. The function returns NGX_ERROR on error or valid index otherwise, which is typically stored somewhere in a module configuration for future use.
+
+All HTTP variables are evaluated in the context of HTTP request and results are specific to and cached in HTTP request. All functions that evaluate variables return ngx_http_variable_value_t type, representing the variable value:
+
+```
+typedef ngx_variable_value_t  ngx_http_variable_value_t;
+
+typedef struct {
+    unsigned    len:28;
+
+    unsigned    valid:1;
+    unsigned    no_cacheable:1;
+    unsigned    not_found:1;
+    unsigned    escape:1;
+
+    u_char     *data;
+} ngx_variable_value_t;
+```
+
+where:
+
+* len — length of a value
+* data — value itself
+* valid — value is valid
+* not_found — variable was not found and thus the data and len fields are irrelevant; this may happen, for example, with such variables as $arg_foo when a corresponding argument was not passed in a request
+* no_cacheable — do not cache result
+* escape — used internally by the logging module to mark values that require escaping on output
+
+The ngx_http_get_flushed_variable() and ngx_http_get_indexed_variable() functions are used to obtain the variable value. They have the same interface - accepting a HTTP request r as a context for evaluating the variable and an index, identifying it. Example of typical usage:
+
+```
+ngx_http_variable_value_t  *v;
+
+v = ngx_http_get_flushed_variable(r, index);
+
+if (v == NULL || v->not_found) {
+    /* we failed to get value or there is no such variable, handle it */
+    return NGX_ERROR;
+}
+
+/* some meaningful value is found */
+```
+
+The difference between functions is that the ngx_http_get_indexed_variable() returns cached value and ngx_http_get_flushed_variable() flushes cache for non-cacheable variables.
+
+There are cases when it is required to deal with variables which names are not known at configuration time and thus they cannot be accessed using indexes, for example in modules like SSI or Perl. The ngx_http_get_variable(r, name, key) function may be used in such cases. It searches for the variable with a given name and its hash key.
+
+Creating variables
+------------------
+
+To create a variable ngx_http_add_variable() function is used. It takes configuration (where variable is registered), variable name and flags that control its behaviour:
+
+* NGX_HTTP_VAR_CHANGEABLE  — allows redefining the variable; If another module will define a variable with such name, no conflict will happen. For example, this allows user to override variables using the set directive.
+* NGX_HTTP_VAR_NOCACHEABLE  — disables caching, is useful for such variables as $time_local
+* NGX_HTTP_VAR_NOHASH  — indicates that this variable is only accessible by index, not by name. This is a small optimization which may be used when it is known that the variable is not needed in modules like SSI or Perl.
+* NGX_HTTP_VAR_PREFIX  — the name of this variable is a prefix. A handler must implement additional logic to obtain value of specific variable. For example, all “arg_” variables are processed by the same handler which performs lookup in request arguments and returns value of specific argument.
+
+The function returns NULL in case of error or a pointer to ngx_http_variable_t:
+
+```
+struct ngx_http_variable_s {
+    ngx_str_t                     name;
+    ngx_http_set_variable_pt      set_handler;
+    ngx_http_get_variable_pt      get_handler;
+    uintptr_t                     data;
+    ngx_uint_t                    flags;
+    ngx_uint_t                    index;
+};
+```
+
+The get and set handlers are called to obtain or set the variable value, data will be passed to variable handlers, index will hold assigned variable index, used to reference the variable.
+
+Usually, a null-terminated static array of such structures is created by a module and processed at the preconfiguration stage to add variables into configuration:
+
+```
+static ngx_http_variable_t  ngx_http_foo_vars[] = {
+
+    { ngx_string("foo_v1"), NULL, ngx_http_foo_v1_variable, NULL, 0, 0 },
+
+    { ngx_null_string, NULL, NULL, 0, 0, 0 }
+};
+
+static ngx_int_t
+ngx_http_foo_add_variables(ngx_conf_t *cf)
+{
+    ngx_http_variable_t  *var, *v;
+
+    for (v = ngx_http_foo_vars; v->name.len; v++) {
+        var = ngx_http_add_variable(cf, &v->name, v->flags);
+        if (var == NULL) {
+            return NGX_ERROR;
+        }
+
+        var->get_handler = v->get_handler;
+        var->data = v->data;
+    }
+
+    return NGX_OK;
+}
+```
+
+This function is used to initialize the preconfiguration field of the HTTP module context and is called before parsing HTTP configuration, so it could refer to these variables.
+
+The get handler is responsible for evaluating the variable in a context of specific request, for example:
+
+```
+static ngx_int_t
+ngx_http_variable_connection(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    u_char  *p;
+
+    p = ngx_pnalloc(r->pool, NGX_ATOMIC_T_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    v->len = ngx_sprintf(p, "%uA", r->connection->number) - p;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = p;
+
+    return NGX_OK;
+}
+```
+
+It returns NGX_ERROR in case of internal error (for example, failed memory allocation) or NGX_OK otherwise. The status of variable evaluation may be understood by inspecting flags of the ngx_http_variable_value_t (see description above).
+
+The set handler allows setting the property referred by the variable. For example, the $limit_rate variable set handler modifies the request's limit_rate field:
+
+```
+...
+{ ngx_string("limit_rate"), ngx_http_variable_request_set_size,
+  ngx_http_variable_request_get_size,
+  offsetof(ngx_http_request_t, limit_rate),
+  NGX_HTTP_VAR_CHANGEABLE|NGX_HTTP_VAR_NOCACHEABLE, 0 },
+...
+
+static void
+ngx_http_variable_request_set_size(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    ssize_t    s, *sp;
+    ngx_str_t  val;
+
+    val.len = v->len;
+    val.data = v->data;
+
+    s = ngx_parse_size(&val);
+
+    if (s == NGX_ERROR) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "invalid size \"%V\"", &val);
+        return;
+    }
+
+    sp = (ssize_t *) ((char *) r + data);
+
+    *sp = s;
+
+    return;
+}
+```
 
 Complex values
 --------------
-TODO
+
+A complex value, despite its name, provides an easy way to evaluate expressions that may contain text, variables, and their combination.
+
+The complex value description in ngx_http_compile_complex_value is compiled at the configuration stage into ngx_http_complex_value_t which is used at runtime to obtain evaluated expression results.
+
+```
+ngx_str_t                         *value;
+ngx_http_complex_value_t           cv;
+ngx_http_compile_complex_value_t   ccv;
+
+value = cf->args->elts; /* directive arguments */
+
+ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
+
+ccv.cf = cf;
+ccv.value = &value[1];
+ccv.complex_value = &cv;
+ccv.zero = 1;
+ccv.conf_prefix = 1;
+
+if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
+    return NGX_CONF_ERROR;
+}
+```
+
+Here, ccv holds all parameters that are required to initialize the complex value cv:
+
+* cf — configuration pointer
+* value — string for parsing (input)
+* complex_value — compiled value (output)
+* zero — flag that enables zero-terminating value
+* conf_prefix — prefixes result with configuration prefix (the directory where nginx is currently looking for configuration)
+* root_prefix — prefixes result with root prefix (this is the normal nginx installation prefix)
+
+The zero flag is usable when results are to be passed to libraries that require zero-terminated strings, and prefixes are handy when dealing with filenames.
+
+Upon successful compilation, cv.lengths may be inspected to get information about the presence of variables in the expression. The NULL value means that the expression contained static text only, and there is no need in storing it as a complex value, so a simple string can be used.
+
+The ngx_http_set_complex_value_slot() is a convenient function used to initialize complex value completely right in the directive declaration.
+
+At runtime, a complex value may be calculated using the ngx_http_complex_value() function:
+
+```
+ngx_str_t  res;
+
+if (ngx_http_complex_value(r, &cv, &res) != NGX_OK) {
+    return NGX_ERROR;
+}
+```
+
+Given the request r and previously compiled value cv the function will evaluate expression and put result into res.
 
 Request redirection
 -------------------
-TODO
+
+An HTTP request is always connected to a location via the loc_conf field of the ngx_http_request_t structure. This means that at any point the location configuration of any module can be retrieved from the request by calling ngx_http_get_module_loc_conf(r, module). Request location may be changed several times throughout its lifetime. Initially, a default server location of the default server is assigned to a request. Once a request switches to a different server (chosen by the HTTP “Host” header or SSL SNI extension), the request switches to the default location of that server as well. The next change of the location takes place at the NGX_HTTP_FIND_CONFIG_PHASE request phase. At this phase a location is chosen by request URI among all non-named locations configured for the server. The ngx_http_rewrite_module may change the request URI at the NGX_HTTP_REWRITE_PHASE request phase as a result of rewrite and return to the NGX_HTTP_FIND_CONFIG_PHASE phase for choosing a new location based on the new URI.
+
+It is also possible to redirect a request to a new location at any point by calling one of the functions ngx_http_internal_redirect(r, uri, args) or ngx_http_named_location(r, name).
+
+The function ngx_http_internal_redirect(r, uri, args) changes the request URI and returns the request to the NGX_HTTP_SERVER_REWRITE_PHASE phase. The request proceeds with a server default location. Later at NGX_HTTP_FIND_CONFIG_PHASE a new location is chosen based on the new request URI.
+
+The following example performs an internal redirect with the new request arguments.
+
+```
+ngx_int_t
+ngx_http_foo_redirect(ngx_http_request_t *r)
+{
+    ngx_str_t  uri, args;
+
+    ngx_str_set(&uri, "/foo");
+    ngx_str_set(&args, "bar=1");
+
+    return ngx_http_internal_redirect(r, &uri, &args);
+}
+```
+
+The function ngx_http_named_location(r, name) redirects a request to a named location. The name of the location is passed as the argument. The location is looked up among all named locations of the current server, after which the requests switches to the NGX_HTTP_REWRITE_PHASE phase.
+
+The following example performs a redirect to a named location @foo.
+
+```
+ngx_int_t
+ngx_http_foo_named_redirect(ngx_http_request_t *r)
+{
+    ngx_str_t  name;
+
+    ngx_str_set(&name, "foo");
+
+    return ngx_http_named_location(r, &name);
+}
+```
+
+Both functions ngx_http_internal_redirect(r, uri, args) and ngx_http_named_location(r, name) may be called when a request already has some contexts saved in its ctx field by nginx modules. These contexts could become inconsistent with the new location configuration. To prevent inconsistency, all request contexts are erased by both redirect functions.
+
+Redirected and rewritten requests become internal and may access the internal locations. Internal requests have the internal flag set.
 
 Subrequests
 -----------
-TODO
+
+Subrequests are primarily used to include output of one request into another, possibly mixed with other data. A subrequest looks like a normal request, but shares some data with its parent. Particularly, all fields related to client input are shared since a subrequest does not receive any other input from client. The request field parent for a subrequest keeps a link to its parent request and is NULL for the main request. The field main keeps a link to the main request in a group of requests.
+
+A subrequest starts with NGX_HTTP_SERVER_REWRITE_PHASE phase. It passes through the same phases as a normal request and is assigned a location based on its own URI.
+
+Subrequest output header is always ignored. Subrequest output body is placed by the ngx_http_postpone_filter into the right position in relation to other data produced by the parent request.
+
+Subrequests are related to the concept of active requests. A request r is considered active if c->data == r, where c is the client connection object. At any point, only the active request in a request group is allowed to output its buffers to the client. A non-active request can still send its data to the filter chain, but they will not pass beyond the ngx_http_postpone_filter and will remain buffered by that filter until the request becomes active. Here are some rules of request activation:
+
+* Initially, the main request is active
+* The first subrequest of an active request becomes active right after creation
+* The ngx_http_postpone_filter activates the next request in active request's subrequest list, once all data prior to that request are sent
+* When a request is finalized, its parent is activated
+
+A subrequest is created by calling the function ngx_http_subrequest(r, uri, args, psr, ps, flags), where r is the parent request, uri and args are URI and arguments of the subrequest, psr is the output parameter, receiving the newly created subrequest reference, ps is a callback object for notifying the parent request that the subrequest is being finalized, flags is subrequest creation flags bitmask. The following flags are available:
+
+* NGX_HTTP_SUBREQUEST_IN_MEMORY - subrequest output should not be sent to the client, but rather stored in memory. This only works for proxying subrequests. After subrequest finalization its output is available in r->upstream->buffer buffer of type ngx_buf_t
+* NGX_HTTP_SUBREQUEST_WAITED - the subrequest done flag is set even if it is finalized being non-active. This subrequest flag is used by the SSI filter
+* NGX_HTTP_SUBREQUEST_CLONE - the subrequest is created as a clone of its parent. It is started at the same location and proceeds from the same phase as the parent request
+
+The following example creates a subrequest with the URI of "/foo".
+
+```
+ngx_int_t            rc;
+ngx_str_t            uri;
+ngx_http_request_t  *sr;
+
+...
+
+ngx_str_set(&uri, "/foo");
+
+rc = ngx_http_subrequest(r, &uri, NULL, &sr, NULL, 0);
+if (rc == NGX_ERROR) {
+    /* error */
+}
+```
+
+This example clones the current request and sets a finalization callback for the subrequest.
+
+```
+ngx_int_t
+ngx_http_foo_clone(ngx_http_request_t *r)
+{
+    ngx_http_request_t          *sr;
+    ngx_http_post_subrequest_t  *ps;
+
+    ps = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+    if (ps == NULL) {
+        return NGX_ERROR;
+    }
+
+    ps->handler = ngx_http_foo_subrequest_done;
+    ps->data = "foo";
+
+    return ngx_http_subrequest(r, &r->uri, &r->args, &sr, ps,
+                               NGX_HTTP_SUBREQUEST_CLONE);
+}
+
+
+ngx_int_t
+ngx_http_foo_subrequest_done(ngx_http_request_t *r, void *data, ngx_int_t rc)
+{
+    char  *msg = (char *) data;
+
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                  "done subrequest r:%p msg:%s rc:%i", r, msg, rc);
+
+    return rc;
+}
+```
+
+Subrequests are normally created in a body filter. In this case subrequest output can be treated as any other explicit request output. This means that eventually the output of a subrequest is sent to the client after all explicit buffers passed prior to subrequest creation and before any buffers passed later. This ordering is preserved even for large hierarchies of subrequests. The following example inserts a subrequest output after all request data buffers, but before the final buffer with the last_buf flag.
+
+```
+ngx_int_t
+ngx_http_foo_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    ngx_int_t                   rc;
+    ngx_buf_t                  *b;
+    ngx_uint_t                  last;
+    ngx_chain_t                *cl, out;
+    ngx_http_request_t         *sr;
+    ngx_http_foo_filter_ctx_t  *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_foo_filter_module);
+    if (ctx == NULL) {
+        return ngx_http_next_body_filter(r, in);
+    }
+
+    last = 0;
+
+    for (cl = in; cl; cl = cl->next) {
+        if (cl->buf->last_buf) {
+            cl->buf->last_buf = 0;
+            cl->buf->last_in_chain = 1;
+            cl->buf->sync = 1;
+            last = 1;
+        }
+    }
+
+    /* Output explicit output buffers */
+
+    rc = ngx_http_next_body_filter(r, in);
+
+    if (rc == NGX_ERROR || !last) {
+        return rc;
+    }
+
+    /*
+     * Create the subrequest.  The output of the subrequest
+     * will automatically be sent after all preceding buffers,
+     * but before the last_buf buffer passed later in this function.
+     */
+
+    if (ngx_http_subrequest(r, ctx->uri, NULL, &sr, NULL, 0) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    ngx_http_set_ctx(r, NULL, ngx_http_foo_filter_module);
+
+
+    /* Output the final buffer with the last_buf flag */
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return NGX_ERROR;
+    }
+
+    b->last_buf = 1;
+
+    out.buf = b;
+    out.next = NULL;
+
+    return ngx_http_output_filter(r, &out);
+}
+```
+
+A subrequest may also be created for other purposes than data output. For example, the ngx_http_auth_request_module creates a subrequest at NGX_HTTP_ACCESS_PHASE phase. To disable any output at this point, the subrequest header_only flag is set. This prevents subrequest body from being sent to the client. Its header is ignored anyway. The result of the subrequest can be analyzed in the callback handler.
 
 Request finalization
 --------------------
-TODO
+
+An HTTP request is finalized by calling the function ngx_http_finalize_request(r, rc). It is usually finalized by the content handler after sending all output buffers to the filter chain. At this point the output may not be completely sent to the client, but remain buffered somewhere along the filter chain. If it is, the ngx_http_finalize_request(r, rc) function will automatically install a special handler ngx_http_writer(r) to finish sending the output. A request is also finalized in case of an error or if a standard HTTP response code needs to be returned to the client.
+
+The function ngx_http_finalize_request(r, rc) expects the following rc values:
+
+* NGX_DONE - fast finalization. Decrement request count and destroy the request if it reaches zero. The client connection may still be used for more requests after that
+* NGX_ERROR, NGX_HTTP_REQUEST_TIME_OUT (408), NGX_HTTP_CLIENT_CLOSED_REQUEST (499) - error finalization. Terminate the request as soon as possible and close the client connection.
+* NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), codes greater than or equal to NGX_HTTP_SPECIAL_RESPONSE (300) - special response finalization. For these values nginx either sends a default code response page to the client or performs the internal redirect to an error_page location if it's configured for the code
+* Other codes are considered success finalization codes and may activate the request writer to finish sending the response body. Once body is completely sent, request count is decremented. If it reaches zero, the request is destroyed, but the client connection may still be used for other requests. If count is positive, there are unfinished activities within the request, which will be finalized at a later point.
 
 Request body
 ------------
-TODO
+
+For dealing with client request body, nginx provides the following functions: ngx_http_read_client_request_body(r, post_handler) and ngx_http_discard_request_body(r). The first function reads the request body and makes it available via the request_body request field. The second function instructs nginx to discard (read and ignore) the request body. One of these functions must be called for every request. Normally, it is done in the content handler.
+
+Reading or discarding client request body from a subrequest is not allowed. It should always be done in the main request. When a subrequest is created, it inherits the parent request_body object which can be used by the subrequest if the main request has previously read the request body.
+
+The function ngx_http_read_client_request_body(r, post_handler) starts the process of reading the request body. When the body is completely read, the post_handler callback is called to continue processing the request. If request body is missing or already read, the callback is called immediately. The function ngx_http_read_client_request_body(r, post_handler) allocates the request_body request field of type ngx_http_request_body_t. The field bufs of this object keeps the result as a buffer chain. The body can be saved in memory buffers or file buffers, if client_body_buffer_size is not enough to fit the entire body in memory.
+
+The following example reads client request body and returns its size.
+
+```
+ngx_int_t
+ngx_http_foo_content_handler(ngx_http_request_t *r)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_read_client_request_body(r, ngx_http_foo_init);
+
+    if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+        /* error */
+        return rc;
+    }
+
+    return NGX_DONE;
+}
+
+
+void
+ngx_http_foo_init(ngx_http_request_t *r)
+{
+    off_t         len;
+    ngx_buf_t    *b;
+    ngx_int_t     rc;
+    ngx_chain_t  *in, out;
+
+    if (r->request_body == NULL) {
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
+    len = 0;
+
+    for (in = r->request_body->bufs; in; in = in->next) {
+        len += ngx_buf_size(in->buf);
+    }
+
+    b = ngx_create_temp_buf(r->pool, NGX_OFF_T_LEN);
+    if (b == NULL) {
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
+    b->last = ngx_sprintf(b->pos, "%O", len);
+    b->last_buf = (r == r->main) ? 1: 0;
+    b->last_in_chain = 1;
+
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+
+    if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
+        ngx_http_finalize_request(r, rc);
+        return;
+    }
+
+    out.buf = b;
+    out.next = NULL;
+
+    rc = ngx_http_output_filter(r, &out);
+
+    ngx_http_finalize_request(r, rc);
+}
+```
+
+The following fields of the request affect the way request body is read:
+
+* request_body_in_single_buf - read body to a single memory buffer
+* request_body_in_file_only - always read body to a file, even if fits the memory buffer
+* request_body_in_persistent_file - do not unlink the file right after creation. Such a file can be moved to another directory
+* request_body_in_clean_file - unlink the file the when the request is finalized. This can be useful when a file was supposed to be moved to another directory but eventually was not moved for some reason
+* request_body_file_group_access - enable file group access. By default a file is created with 0600 access mask. When the flag is set, 0660 access mask is used
+* request_body_file_log_level - log file errors with this log level
+* request_body_no_buffering - read request body without buffering
+
+When the request_body_no_buffering flag is set, the unbuffered mode of reading the request body is enabled. In this mode, after calling ngx_http_read_client_request_body(), the bufs chain may keep only a part of the body. To read the next part, the ngx_http_read_unbuffered_request_body(r) function should be called. The return value of NGX_AGAIN and the request flag reading_body indicate that more data is available. If bufs is NULL after calling this function, there is nothing to read at the moment. The request callback read_event_handler will be called when the next part of request body is available.
 
 Response
 --------
-TODO
+
+An HTTP response in nginx is produced by sending the response header followed by the optional response body. Both header and body are passed through a chain of filters and eventually get written to the client socket. An nginx module can install its handler into the header or body filter chain and process the output coming from the previous handler.
+
+Response header
+---------------
+
+Output header is sent by the function ngx_http_send_header(r). Prior to calling this function, r->headers_out should contain all the data required to produce the HTTP response header. It's always required to set the status field of r->headers_out. If the response status suggests that a response body follows the header, content_length_n can be set as well. The default value for this field is -1, which means that the body size is unknown. In this case, chunked transfer encoding is used. To output an arbitrary header, headers list should be appended.
+
+```
+static ngx_int_t
+ngx_http_foo_content_handler(ngx_http_request_t *r)
+{
+    ngx_int_t         rc;
+    ngx_table_elt_t  *h;
+
+    /* send header */
+
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = 3;
+
+    /* X-Foo: foo */
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 1;
+    ngx_str_set(&h->key, "X-Foo");
+    ngx_str_set(&h->value, "foo");
+
+    rc = ngx_http_send_header(r);
+
+    if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
+        return rc;
+    }
+
+    /* send body */
+
+    ...
+}
+```
+
+Header filters
+--------------
+
+The ngx_http_send_header(r) function invokes the header filter chain by calling the top header filter handler ngx_http_top_header_filter. It's assumed that every header handler calls the next handler in chain until the final handler ngx_http_header_filter(r) is called. The final header handler constructs the HTTP response based on r->headers_out and passes it to the ngx_http_writer_filter for output.
+
+To add a handler to the header filter chain, one should store its address in ngx_http_top_header_filter global variable at configuration time. The previous handler address is normally stored in a module's static variable and is called by the newly added handler before exiting.
+
+The following is an example header filter module, adding the HTTP header "X-Foo: foo" to every output with the status 200.
+
+```
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+
+static ngx_int_t ngx_http_foo_header_filter(ngx_http_request_t *r);
+static ngx_int_t ngx_http_foo_header_filter_init(ngx_conf_t *cf);
+
+
+static ngx_http_module_t  ngx_http_foo_header_filter_module_ctx = {
+    NULL,                                   /* preconfiguration */
+    ngx_http_foo_header_filter_init,        /* postconfiguration */
+
+    NULL,                                   /* create main configuration */
+    NULL,                                   /* init main configuration */
+
+    NULL,                                   /* create server configuration */
+    NULL,                                   /* merge server configuration */
+
+    NULL,                                   /* create location configuration */
+    NULL                                    /* merge location configuration */
+};
+
+
+ngx_module_t  ngx_http_foo_header_filter_module = {
+    NGX_MODULE_V1,
+    &ngx_http_foo_header_filter_module_ctx, /* module context */
+    NULL,                                   /* module directives */
+    NGX_HTTP_MODULE,                        /* module type */
+    NULL,                                   /* init master */
+    NULL,                                   /* init module */
+    NULL,                                   /* init process */
+    NULL,                                   /* init thread */
+    NULL,                                   /* exit thread */
+    NULL,                                   /* exit process */
+    NULL,                                   /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+
+static ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
+
+
+static ngx_int_t
+ngx_http_foo_header_filter(ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *h;
+
+    /*
+     * The filter handler adds "X-Foo: foo" header
+     * to every HTTP 200 response
+     */
+
+    if (r->headers_out.status != NGX_HTTP_OK) {
+        return ngx_http_next_header_filter(r);
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 1;
+    ngx_str_set(&h->key, "X-Foo");
+    ngx_str_set(&h->value, "foo");
+
+    return ngx_http_next_header_filter(r);
+}
+
+
+static ngx_int_t
+ngx_http_foo_header_filter_init(ngx_conf_t *cf)
+{
+    ngx_http_next_header_filter = ngx_http_top_header_filter;
+    ngx_http_top_header_filter = ngx_http_foo_header_filter;
+
+    return NGX_OK;
+}
+```
 
 Response body
 -------------
-TODO
+
+Response body is sent by calling the function ngx_http_output_filter(r, cl). The function can be called multiple times. Each time it sends a part of the response body passed as a buffer chain. The last body buffer should have the last_buf flag set.
+
+The following example produces a complete HTTP output with "foo" as its body. In order for the example to work not only as a main request but as a subrequest as well, the last_in_chain_flag is set in the last buffer of the output. The last_buf flag is set only for the main request since a subrequest's last buffers does not end the entire output.
+
+```
+static ngx_int_t
+ngx_http_bar_content_handler(ngx_http_request_t *r)
+{
+    ngx_int_t     rc;
+    ngx_buf_t    *b;
+    ngx_chain_t   out;
+
+    /* send header */
+
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = 3;
+
+    rc = ngx_http_send_header(r);
+
+    if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
+        return rc;
+    }
+
+    /* send body */
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return NGX_ERROR;
+    }
+
+    b->last_buf = (r == r->main) ? 1: 0;
+    b->last_in_chain = 1;
+
+    b->memory = 1;
+
+    b->pos = (u_char *) "foo";
+    b->last = b->pos + 3;
+
+    out.buf = b;
+    out.next = NULL;
+
+    return ngx_http_output_filter(r, &out);
+}
+```
 
 Body filters
 ------------
-TODO
+
+The function ngx_http_output_filter(r, cl) invokes the body filter chain by calling the top body filter handler ngx_http_top_body_filter. It's assumed that every body handler calls the next handler in chain until the final handler ngx_http_write_filter(r, cl) is called.
+
+A body filter handler receives a chain of buffers. The handler is supposed to process the buffers and pass a possibly new chain to the next handler. It's worth noting that the chain links ngx_chain_t of the incoming chain belong to the caller. They should never be reused or changed. Right after the handler completes, the caller can use its output chain links to keep track of the buffers it has sent. To save the buffer chain or to substitute some buffers before sending further, a handler should allocate its own chain links.
+
+Following is the example of a simple body filter counting the number of body bytes. The result is available as the $counter variable which can be used in the access log.
+
+```
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+
+typedef struct {
+    off_t  count;
+} ngx_http_counter_filter_ctx_t;
+
+
+static ngx_int_t ngx_http_counter_body_filter(ngx_http_request_t *r,
+    ngx_chain_t *in);
+static ngx_int_t ngx_http_counter_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_counter_add_variables(ngx_conf_t *cf);
+static ngx_int_t ngx_http_counter_filter_init(ngx_conf_t *cf);
+
+
+static ngx_http_module_t  ngx_http_counter_filter_module_ctx = {
+    ngx_http_counter_add_variables,        /* preconfiguration */
+    ngx_http_counter_filter_init,          /* postconfiguration */
+
+    NULL,                                  /* create main configuration */
+    NULL,                                  /* init main configuration */
+
+    NULL,                                  /* create server configuration */
+    NULL,                                  /* merge server configuration */
+
+    NULL,                                  /* create location configuration */
+    NULL                                   /* merge location configuration */
+};
+
+
+ngx_module_t  ngx_http_counter_filter_module = {
+    NGX_MODULE_V1,
+    &ngx_http_counter_filter_module_ctx,   /* module context */
+    NULL,                                  /* module directives */
+    NGX_HTTP_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+
+static ngx_http_output_body_filter_pt  ngx_http_next_body_filter;
+
+static ngx_str_t  ngx_http_counter_name = ngx_string("counter");
+
+
+static ngx_int_t
+ngx_http_counter_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    ngx_chain_t                    *cl;
+    ngx_http_counter_filter_ctx_t  *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_counter_filter_module);
+    if (ctx == NULL) {
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_counter_filter_ctx_t));
+        if (ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        ngx_http_set_ctx(r, ctx, ngx_http_counter_filter_module);
+    }
+
+    for (cl = in; cl; cl = cl->next) {
+        ctx->count += ngx_buf_size(cl->buf);
+    }
+
+    return ngx_http_next_body_filter(r, in);
+}
+
+
+static ngx_int_t
+ngx_http_counter_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
+    uintptr_t data)
+{
+    u_char                         *p;
+    ngx_http_counter_filter_ctx_t  *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_counter_filter_module);
+    if (ctx == NULL) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    p = ngx_pnalloc(r->pool, NGX_OFF_T_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    v->data = p;
+    v->len = ngx_sprintf(p, "%O", ctx->count) - p;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_counter_add_variables(ngx_conf_t *cf)
+{
+    ngx_http_variable_t  *var;
+
+    var = ngx_http_add_variable(cf, &ngx_http_counter_name, 0);
+    if (var == NULL) {
+        return NGX_ERROR;
+    }
+
+    var->get_handler = ngx_http_counter_variable;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_counter_filter_init(ngx_conf_t *cf)
+{
+    ngx_http_next_body_filter = ngx_http_top_body_filter;
+    ngx_http_top_body_filter = ngx_http_counter_body_filter;
+
+    return NGX_OK;
+}
+```
 
 Building filter modules
 -----------------------
-TODO
+
+When writing a body or header filter, a special care should be taken of the filters order. There's a number of header and body filters registered by nginx standard modules. It's important to register a filter module in the right place in respect to other filters. Normally, filters are registered by modules in their postconfiguration handlers. The order in which filters are called is obviously the reverse of when they are registered.
+
+A special slot HTTP_AUX_FILTER_MODULES for third-party filter modules is provided by nginx. To register a filter module in this slot, the ngx_module_type variable should be set to the value of HTTP_AUX_FILTER in module's configuration.
+
+The following example shows a filter module config file assuming it only has one source file ngx_http_foo_filter_module.c
+
+```
+ngx_module_type=HTTP_AUX_FILTER
+ngx_module_name=ngx_http_foo_filter_module
+ngx_module_srcs="$ngx_addon_dir/ngx_http_foo_filter_module.c"
+
+. auto/module
+```
 
 Buffer reuse
 ------------
-TODO
+
+When issuing or altering a stream of buffers, it's often desirable to reuse the allocated buffers. A standard approach widely adopted in nginx code is to keep two buffer chains for this purpose: free and busy. The free chain keeps all free buffers. These buffers can be reused. The busy chain keeps all buffers sent by the current module which are still in use by some other filter handler. A buffer is considered in use if its size is greater than zero. Normally, when a buffer is consumed by a filter, its pos (or file_pos for a file buffer) is moved towards last (file_last for a file buffer). Once a buffer is completely consumed, it's ready to be reused. To update the free chain with newly freed buffers, it's enough to iterate over the busy chain and move the zero size buffers at the head of it to free. This operation is so common that there is a special function ngx_chain_update_chains(free, busy, out, tag) which does this. The function appends the output chain out to busy and moves free buffers from the top of busy to free. Only the buffers with the given tag are reused. This lets a module reuse only the buffers allocated by itself.
+
+The following example is a body filter inserting the “foo” string before each incoming buffer. The new buffers allocated by the module are reused if possible. Note that for this example to work properly, it's also required to set up a header filter and reset content_length_n to -1, which is beyond the scope of this section.
+
+```
+typedef struct {
+    ngx_chain_t  *free;
+    ngx_chain_t  *busy;
+}  ngx_http_foo_filter_ctx_t;
+
+
+ngx_int_t
+ngx_http_foo_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    ngx_int_t                   rc;
+    ngx_buf_t                  *b;
+    ngx_chain_t                *cl, *tl, *out, **ll;
+    ngx_http_foo_filter_ctx_t  *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_foo_filter_module);
+    if (ctx == NULL) {
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_foo_filter_ctx_t));
+        if (ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        ngx_http_set_ctx(r, ctx, ngx_http_foo_filter_module);
+    }
+
+    /* create a new chain "out" from "in" with all the changes */
+
+    ll = &out;
+
+    for (cl = in; cl; cl = cl->next) {
+
+        /* append "foo" in a reused buffer if possible */
+
+        tl = ngx_chain_get_free_buf(r->pool, &ctx->free);
+        if (tl == NULL) {
+            return NGX_ERROR;
+        }
+
+        b = tl->buf;
+        b->tag = (ngx_buf_tag_t) &ngx_http_foo_filter_module;
+        b->memory = 1;
+        b->pos = (u_char *) "foo";
+        b->last = b->pos + 3;
+
+        *ll = tl;
+        ll = &tl->next;
+
+        /* append the next incoming buffer */
+
+        tl = ngx_alloc_chain_link(r->pool);
+        if (tl == NULL) {
+            return NGX_ERROR;
+        }
+
+        tl->buf = cl->buf;
+        *ll = tl;
+        ll = &tl->next;
+    }
+
+    *ll = NULL;
+
+    /* send the new chain */
+
+    rc = ngx_http_next_body_filter(r, out);
+
+    /* update "busy" and "free" chains for reuse */
+
+    ngx_chain_update_chains(r->pool, &ctx->free, &ctx->busy, &out,
+                            (ngx_buf_tag_t) &ngx_http_foo_filter_module);
+
+    return rc;
+}
+```
 
 Load balancing
 --------------
