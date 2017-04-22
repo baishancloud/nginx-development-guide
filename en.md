@@ -198,7 +198,7 @@ Formatting
 A number of formatting functions are provided by nginx. These functions support nginx-specific types:
 * ngx_sprintf(buf, fmt, ...)
 * ngx_snprintf(buf, max, fmt, ...)
-* ngx_slrintf(buf, last, fmt, ...)
+* ngx_slpintf(buf, last, fmt, ...)
 * ngx_vslprint(buf, last, fmt, args)
 * ngx_vsnprint(buf, max, fmt, args)
 

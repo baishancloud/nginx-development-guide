@@ -205,7 +205,7 @@ nginx提供了一些格式化字符串的函数。以下这些函数支持nginx�
 
 * ngx_sprintf(buf, fmt, ...)
 * ngx_snprintf(buf, max, fmt, ...)
-* ngx_slrintf(buf, last, fmt, ...)
+* ngx_slpintf(buf, last, fmt, ...)
 * ngx_vslprint(buf, last, fmt, args)
 * ngx_vsnprint(buf, max, fmt, args)
 
