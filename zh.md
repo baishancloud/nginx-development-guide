@@ -42,7 +42,7 @@ NGINX开发指南
 * [HTTP](#hTTP)
     * [Connection](#connection)
     * [Request](#request)
-    * [Configuration](#configuration)
+    * [配置](#配置)
     * [Phases](#phases)
     * [Variables](#variables)
     * [Complex values](#complex-values)
@@ -1637,9 +1637,165 @@ For each client HTTP request the ngx_http_request_t object is created. Some of t
 * main_filter_need_in_memory, filter_need_in_memory — flags showing that the output should be produced in memory buffers but not in files. This is a signal to the copy filter to read data from file buffers even if sendfile is enabled. The difference between these two flags is the location of filter modules which set them. Filters called before the postpone filter in filter chain, set filter_need_in_memory requesting that only the current request output should come in memory buffers. Filters called later in filter chain set main_filter_need_in_memory requiring that both the main request and all the subrequest read files in memory while sending output
 * filter_need_temporary — flag showing that the request output should be produced in temporary buffers, but not in readonly memory buffers or file buffers. This is used by filters which may change output directly in the buffers, where it's sent
 
-Configuration
+配置
 -------------
-TODO
+
+Each HTTP module may have three types of configuration:
+
+* Main configuration. This configuration applies to the entire nginx http{} block. This is global confi
+guration. It stores global settings for a module
+* Server configuration. This configuraion applies to a single nginx server{}. It stores server-specific
+ settings for a module
+* Location configuration. This configuraion applies to a single location{}, if{} or limit_except() bloc
+k. This configuration stores settings specific to a location
+
+Configuration structures are created at nginx configuration stage by calling functions, which allocate
+these structures, initialize them and merge. The following example shows how to create a simple module
+location configuration. The configuration has one setting foo of unsiged integer type.
+
+```
+typedef struct {
+    ngx_uint_t  foo;
+} ngx_http_foo_loc_conf_t;
+
+
+static ngx_http_module_t  ngx_http_foo_module_ctx = {
+    NULL,                                  /* preconfiguration */
+    NULL,                                  /* postconfiguration */
+
+    NULL,                                  /* create main configuration */
+    NULL,                                  /* init main configuration */
+
+    NULL,                                  /* create server configuration */
+    NULL,                                  /* merge server configuration */
+
+    ngx_http_foo_create_loc_conf,          /* create location configuration */
+    ngx_http_foo_merge_loc_conf            /* merge location configuration */
+};
+
+
+static void *
+ngx_http_foo_create_loc_conf(ngx_conf_t *cf)
+{
+    ngx_http_foo_loc_conf_t  *conf;
+
+    conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_foo_loc_conf_t));
+    if (conf == NULL) {
+        return NULL;
+    }
+
+    conf->foo = NGX_CONF_UNSET_UINT;
+
+    return conf;
+}
+
+
+static char *
+ngx_http_foo_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
+{
+    ngx_http_foo_loc_conf_t *prev = parent;
+    ngx_http_foo_loc_conf_t *conf = child;
+
+    ngx_conf_merge_uint_value(conf->foo, prev->foo, 1);
+}
+```
+
+As seen in the example, ngx_http_foo_create_loc_conf() function creates a new configuration structure a
+nd ngx_http_foo_merge_loc_conf() merges a configuration with another configuration from a higher level.
+ In fact, server and location configuration do not only exist at server and location levels, but also c
+reated for all the levels above. Specifically, a server configuration is created at the main level as w
+ell and location configurations are created for main, server and location levels. These configurations
+make it possible to specify server and location-specific settings at any level of nginx configuration f
+ile. Eventually configurations are merged down. To indicate a missing setting and ignore it while mergi
+ng, nginx provides a number of macros like NGX_CONF_UNSET and NGX_CONF_UNSET_UINT. Standard nginx merge
+ macros like ngx_conf_merge_value() and ngx_conf_merge_uint_value() provide a convenient way to merge a
+ setting and set the default value if none of configurations provided an explicit value. For complete l
+ist of macros for different types see src/core/ngx_conf_file.h.
+
+To access configuration of any HTTP module at configuration time, the following macros are available. T
+hey receive ngx_conf_t reference as the first argument.
+
+* ngx_http_conf_get_module_main_conf(cf, module)
+* ngx_http_conf_get_module_srv_conf(cf, module)
+* ngx_http_conf_get_module_loc_conf(cf, module)
+
+The following example gets a pointer to a location configuration of standard nginx core module ngx_http
+_core_module and changes location content handler kept in the handler field of the structure.
+
+As seen in the example, ngx_http_foo_create_loc_conf() function creates a new configuration structure a
+nd ngx_http_foo_merge_loc_conf() merges a configuration with another configuration from a higher level.
+ In fact, server and location configuration do not only exist at server and location levels, but also c
+reated for all the levels above. Specifically, a server configuration is created at the main level as w
+ell and location configurations are created for main, server and location levels. These configurations
+make it possible to specify server and location-specific settings at any level of nginx configuration f
+ile. Eventually configurations are merged down. To indicate a missing setting and ignore it while mergi
+ng, nginx provides a number of macros like NGX_CONF_UNSET and NGX_CONF_UNSET_UINT. Standard nginx merge
+ macros like ngx_conf_merge_value() and ngx_conf_merge_uint_value() provide a convenient way to merge a
+ setting and set the default value if none of configurations provided an explicit value. For complete l
+ist of macros for different types see src/core/ngx_conf_file.h.
+
+To access configuration of any HTTP module at configuration time, the following macros are available. T
+hey receive ngx_conf_t reference as the first argument.
+
+* ngx_http_conf_get_module_main_conf(cf, module)
+* ngx_http_conf_get_module_srv_conf(cf, module)
+* ngx_http_conf_get_module_loc_conf(cf, module)
+
+The following example gets a pointer to a location configuration of standard nginx core module ngx_http
+_core_module and changes location content handler kept in the handler field of the structure.
+
+```
+static ngx_int_t ngx_http_foo_handler(ngx_http_request_t *r);
+
+
+static ngx_command_t  ngx_http_foo_commands[] = {
+
+    { ngx_string("foo"),
+      NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
+      ngx_http_foo,
+      0,
+      0,
+      NULL },
+
+      ngx_null_command
+};
+
+
+static char *
+ngx_http_foo(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_core_loc_conf_t  *clcf;
+
+    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    clcf->handler = ngx_http_bar_handler;
+
+    return NGX_CONF_OK;
+}
+```
+
+In runtime the following macros are available to get configurations of HTTP modules.
+
+* ngx_http_get_module_main_conf(r, module)
+* ngx_http_get_module_srv_conf(r, module)
+* ngx_http_get_module_loc_conf(r, module)
+
+These macros receive a reference to an HTTP request ngx_http_request_t. Main configuration of a request
+ never changes. Server configuration may change from a default one after choosing a virtual server for
+a request. Request location configuration may change multiple times as a result of a rewrite or interna
+l redirect. The following example shows how to access HTTP configuration in runtime.
+
+```
+static ngx_int_t
+ngx_http_foo_handler(ngx_http_request_t *r)
+{
+    ngx_http_foo_loc_conf_t  *flcf;
+
+    flcf = ngx_http_get_module_loc_conf(r, ngx_http_foo_module);
+
+    ...
+}
+```
+
 
 Phases
 ------
