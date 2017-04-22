@@ -1,27 +1,28 @@
 NGINX开发指南
 ===========
 
-* [Introduction](#introduction)
-    * [Code layout](#code-layout)
-    * [Include files](#include-files)
-    * [Integers](#integers)
-    * [Common return codes](#common-return-codes)
-    * [Error handling](#error-handling)
-* [Strings](#strings)
-    * [Overview](#overview)
-    * [Formatting](#formatting)
-    * [Numeric conversion](#numeric-conversion)
-    * [Regular expressions](#regular-expressions)
-* [Containers](#containers)
-    * [Array](#array)
-    * [List](#list)
-    * [Queue](#queue)
-    * [Red Black tree](#red-Black-tree)
-    * [Hash](#hash)
-* [Memory management](#memory-management)
-    * [Heap](#heap)
-    * [Pool](#pool)
-    * [Shared memory](#shared-memory)
+* [译者序](#译者序)
+* [简介](#简介)
+    * [代码结构](#代码结构)
+    * [头文件](#头文件)
+    * [整数](#整数)
+    * [常用返回值](#常用返回值)
+    * [错误处理](#错误处理)
+* [字符串](#字符串)
+    * [概述](#概述)
+    * [格式化](#格式化)
+    * [数值转换](#数值转换)
+    * [正则表达式](#正则表达式)
+* [容器](#容器)
+    * [数组](#数组)
+    * [列表](#列表)
+    * [队列](#队列)
+    * [红黑树](#红黑树)
+    * [哈希](#哈希)
+* [内存管理](#内存管理)
+    * [堆](#堆)
+    * [内存池](#内存池)
+    * [共享内存](#共享内存)
 * [日志](#日志)
 * [周期](#周期)
 * [Buffer](#buffer)
@@ -54,77 +55,82 @@ NGINX开发指南
     * [Body filters](#body-filters)
     * [Building filter modules](#building-filter-modules)
     * [Buffer reuse](#buffer-reuse)
-    * [Load balancing](#load-balancing)
+    * [负载均衡](#负载均衡)
     
-Introduction
-============
+译者序
+=====
 
-Code layout
------------
-* auto — build scripts
+本文档是nginx官方文档“Developer Guide”（[https://nginx.org/en/docs/dev/development_guide.html](https://nginx.org/en/docs/dev/development_guide.html)）的中文版本，由白山云（[http://www.baishancloud.com](http://www.baishancloud.com/zh/)）NGINX开发团队负责翻译。官方文档是HTML页面发布的，我们翻译的时候转成了Markdown，以方便编辑。同时也一并保留了英文的Markdown版本：[https://github.com/baishancloud/nginx-development-guide/blob/master/en.md](https://github.com/baishancloud/nginx-development-guide/blob/master/en.md)。希望此中文版文档能为广大的nginx以及开源爱好者提供入门指导，开发出优秀的nginx模块，回馈社区。
+
+简介
+===
+
+代码结构
+-------
+* auto — 编译脚本
 * src
-    * core — basic types and functions — string, array, log, pool etc
-* event — event core
-    * modules — event notification modules: epoll, kqueue, select etc
-* http — core HTTP module and common code
-    * modules — other HTTP modules
-    * v2 — HTTPv2
-* mail — mail modules
-* os — platform-specific code
+    * core — 基础数据结构和函数 — 字符串，数组，日志，内存池等
+* event — 事件机制核心模块
+    * modules — 具体事件机制模块：epoll，kqueue，select等
+* http — HTTP核心模块和公共代码
+    * modules — 其他HTTP模块
+    * v2 — HTTP/2模块
+* mail — 邮件协议模块
+* os — 平台相关代码
     * unix
     * win32
-* stream — stream modules
+* stream — 流模块
 
-Include files
--------------
-Each nginx file should start with including the following two files:
+头文件
+-----
+每个nginx文件都应该在开头包含如下两个头文件：
 
 ```
 #include <ngx_config.h>
 #include <ngx_core.h>
 ```
 
-In addition to that, HTTP code should include
+除此之外，HTTP相关的代码还要包含：
 
 ```
 #include <ngx_http.h>
 ```
 
-Mail code should include
+邮件模块的代码应该包含：
 
 ```
 #include <ngx_mail.h>
 ```
 
-Stream code should include
+Stream模块的代码应该包含：
 
 ```
 #include <ngx_stream.h>
 ```
 
-Integers
+整数
+----
+一般情况下，nginx代码使用如下两个整数类型：ngx_int_t和ngx_uint_t，分别用typedef定义成了intptr_t和uintptr_t。
+
+常用返回值
 --------
-For general purpose, nginx code uses the following two integer types ngx_int_t and ngx_uint_t which are typedefs for intptr_t and uintptr_t.
+nginx中的大多数函数使用如下类型的返回值：
 
-Common return codes
--------------------
-Most functions in nginx return the following codes:
+* NGX_OK — 处理成功
+* NGX_ERROR — 处理失败
+* NGX_AGAIN — 处理未完成，函数需要被再次调用
+* NGX_DECLINED — 处理被拒绝，例如相关功能在配置文件中被关闭。不要将此当成错误。
+* NGX_BUSY — 资源不可用
+* NGX_DONE — 处理完成或者在他处继续处理。也可以作为处理成功使用。
+* NGX_ABORT — 函数终止。也可以作为处理出错的返回值。
 
-* NGX_OK — operation succeeded
-* NGX_ERROR — operation failed
-* NGX_AGAIN — operation incomplete, function should be called again
-* NGX_DECLINED — operation rejected, for example, if disabled in configuration. This is never an error
-* NGX_BUSY — resource is not available
-* NGX_DONE — operation done or continued elsewhere. Also used as an alternative success code
-* NGX_ABORT — function was aborted. Also used as an alternative error code
+错误处理
+-------
+为了获取最近一次系统错误码，nginx提供了ngx_errno宏。该宏被映射到了POSIX平台的errno变量上，而在Windows平台中，则变为对GetLastError()的函数调用。为了获取最近一次socket错误码，nginx提供了ngx_socket_errno宏。同样，在POSIX平台上该宏被映射为errno变量，而在Windows环境中则是对WSAGetLastError()进行调用。考虑到对性能的影响，ngx_errno和ngx_socket_errno不应该被连续访问。如果有连续、频繁访问的需要，则应该将错误码的值存储到类型为ngx_err_t的本地变量中，然后使用本地变量进行访问。如果需要设置错误码，可以使用ngx_set_errno(errno)和ngx_set_socket_errno(errno)这两个宏。
 
-Error handling
---------------
-For getting the last system error code, the ngx_errno macro is available. It's mapped to errno on POSIX platforms and to GetLastError() call in Windows. For getting the last socket error number, the ngx_socket_errno macro is available. It's mapped to errno on POSIX systems as well, and to WSAGetLastError() call on Windows. For performance reasons the values of ngx_errno or ngx_socket_errno should not be accessed more than once in a row. The error value should be stored in a local variable of type ngx_err_t for using multiple times, if required. For setting errors, ngx_set_errno(errno) and ngx_set_socket_errno(errno) macros are available.
+ngx_errno和ngx_socket_errno变量可以在调用日志相关函数ngx_log_error()和ngx_log_debugX()的时候使用，这样具体的错误文本就会被添加到日志输出中。
 
-The values of ngx_errno or ngx_socket_errno can be passed to logging functions ngx_log_error() and ngx_log_debugX(), in which case system error text is added to the log message.
-
-Example using ngx_errno:
+一个使用ngx_errno的例子：
 
 ```
 void
@@ -148,14 +154,14 @@ ngx_my_kill(ngx_pid_t pid, ngx_log_t *log, int signo)
 }
 ```
 
-Strings
-=======
+字符串
+=====
 
-Overview
---------
-For C strings, nginx code uses unsigned character type pointer u_char *.
+概述
+----
+nginx使用无符号的char类型指针来表示C字符串：u_char *。
 
-The nginx string type ngx_str_t is defined as follows:
+nginx字符串类型ngx_str_t的定义如下所示：
 
 ```
 typedef struct {
@@ -164,9 +170,9 @@ typedef struct {
 } ngx_str_t;
 ```
 
-The len field holds the string length, data holds the string data. The string, held in ngx_str_t, may or may not be null-terminated after the len bytes. In most cases it’s not. However, in certain parts of code (for example, when parsing configuration), ngx_str_t objects are known to be null-terminated, and that knowledge is used to simplify string comparison and makes it easier to pass those strings to syscalls.
+结构体成员len存放字符串的长度，成员data指向字符串本身数据。在ngx_str_t中存放的字符串，对于超出len长度的部分可以是NULL结尾（'\0'——译者注），也可以不是。在大多数情况是不以NULL结尾的。然而，在nginx的某些代码中（例如解析配置的时候），ngx_str_t中的字符串是以NULL结尾的吗，这种情况会使得字符串比较变得更加简单，也使得使用系统调用的时候更加容易。
 
-A number of string operations are provided in nginx. They are declared in src/core/ngx_string.h. Some of them are wrappers around standard C functions:
+nginx提供了一系列关于字符串处理的函数。它们在src/core/ngx_string.h文件中定义。其中的一部分就是对C库中字符串函数的封装：
 
 * ngx_strcmp()
 * ngx_strncmp()
@@ -178,14 +184,14 @@ A number of string operations are provided in nginx. They are declared in src/co
 * ngx_memcpy()
 * ngx_memmove()
 
-Some nginx-specific string functions:
+还有一些nginx特有的字符串函数：
 
-* ngx_memzero() fills memory with zeroes
-* ngx_cpymem() does the same as ngx_memcpy(), but returns the final destination address This one is handy for appending multiple strings in a row
-* ngx_movemem() does the same as ngx_memmove(), but returns the final destination address.
-* ngx_strlchr() searches for a character in a string, delimited by two pointers
+* ngx_memzero() 内存清0
+* ngx_cpymem() 和ngx_memcpy()行为类似，不同的是该函数返回的是copy后的最终目的地址，这在需要连续拼接多个字符串的场景下很方便。
+* ngx_movemem() 和ngx_memmove()的行为类似，不同的是该函数返回的是move后的最终目的地址。
+* ngx_strlchr() 在字符串中查找一个特定字符，字符串由两个指针界定。
 
-Some case conversion and comparison functions:
+最后是一些大小写转换和字符串比较的函数：
 
 * ngx_tolower()
 * ngx_toupper()
@@ -193,16 +199,18 @@ Some case conversion and comparison functions:
 * ngx_strcasecmp()
 * ngx_strncasecmp()
 
-Formatting
-----------
-A number of formatting functions are provided by nginx. These functions support nginx-specific types:
+格式化
+-----
+nginx提供了一些格式化字符串的函数。以下这些函数支持nginx特有的类型：
+
 * ngx_sprintf(buf, fmt, ...)
 * ngx_snprintf(buf, max, fmt, ...)
 * ngx_slrintf(buf, last, fmt, ...)
 * ngx_vslprint(buf, last, fmt, args)
 * ngx_vsnprint(buf, max, fmt, args)
 
-The full list of formatting options, supported by these functions, can be found in src/core/ngx_string.c. Some of them are:
+这些函数支持的全部格式化选项定义在src/core/ngx_string.c文件中，以下是其中的一部分：
+
 ```
 %O — off_t
 %T — time_t
@@ -214,9 +222,10 @@ The full list of formatting options, supported by these functions, can be found 
 %*s — size_t + u_char *
 ```
 
-The ‘u’ modifier makes most types unsigned, ‘X’/‘x’ convert output to hex.
+'u'修饰符将类型指明为无符号，'X'和'x'则将输出转换为16禁止。
 
-Example:
+例如：
+
 ```
 u_char     buf[NGX_INT_T_LEN];
 size_t     len;
@@ -228,21 +237,22 @@ len = ngx_sprintf(buf, "%ui", n) — buf;
 ```
 
 
-Numeric conversion
-------------------
-Several functions for numeric conversion are implemented in nginx:
-* ngx_atoi(line, n) — converts a string of given length to a positive integer of type ngx_int_t. Returns NGX_ERROR on error
-* ngx_atosz(line, n) — same for ssize_t type
-* ngx_atoof(line, n) — same for off_t type
-* ngx_atotm(line, n) — same for time_t type
-* ngx_atofp(line, n, point) — converts a fixed point floating number of given length to a positive integer of type ngx_int_t. The result is shifted left by points decimal positions. The string representation of the number is expected to have no more than points fractional digits. Returns NGX_ERROR on error. For example, ngx_atofp("10.5", 4, 2) returns 1050
-* ngx_hextoi(line, n) — converts hexadecimal representation of a positive integer to ngx_int_t. Returns NGX_ERROR on error
+数值转换
+-------
+nginx实现了若干用于数值转换的函数：
 
-Regular expressions
--------------------
-The regular expressions interface in nginx is a wrapper around the PCRE library. The corresponding header file is src/core/ngx_regex.h.
+* ngx_atoi(line, n) — 将一个指定长度的字符串转换为一个正整数，类型为ngx_int_t。出错返回NGX_ERROR。
+* ngx_atosz(line, n) — 同上，转换类型为ssize_t
+* ngx_atoof(line, n) — 同上，转换类型为off_t
+* ngx_atotm(line, n) — 同上，转换类型为time_t
+* ngx_atofp(line, n, point) — 将一个固定长度的定点小数字符串转换为ngx_int_t类型的正整数。转换结果会左移point指定的10进制位数。字符串中的定点小数不能含有多过point参数指定的小数位。出错返回NGX_ERROR。举例：ngx_atofp("10.5", 4, 2) 返回1050
+* ngx_hextoi(line, n) — 将表示16进制正整数的字符串转换为ngx_int_t类型的整数。出错返回NGX_ERROR。
 
-To use a regular expression for string matching, first, it needs to be compiled, this is usually done at configuration phase. Note that since PCRE support is optional, all code using the interface must be protected by the surrounding NGX_PCRE macro:
+正则表达式
+--------
+nginx中的正则表达式接口是对PCRE库的封装。相关的头文件是src/core/ngx_regex.h。
+
+要使用正则表达式进行字符串匹配，首先需要对正则表达式进行编译，这通常是在配置解析阶段处理的。需要注意的是，因为PCRE的支持是可选的，因此所有使用正则相关接口的代码都需要用NGX_PCRE括起来：
 
 ```
 #if (NGX_PCRE)
@@ -270,9 +280,9 @@ re = rc.regex;
 #endif
 ```
 
-After successful compilation, ngx_regex_compile_t structure fields captures and named_captures are filled with count of all and named captures respectively found in the regular expression.
+编译成功之后，结构体ngx_regex_compile_t的captures和named_captures成员分别会被填上正则表达式中全部以及命名捕获的数量。
 
-Later, the compiled regular expression may be used to match strings against it:
+然后，编译过的正则表达式就可以用来进行字符串匹配：
 
 ```
 ngx_int_t  n;
@@ -293,9 +303,9 @@ if (n >= 0) {
 }
 ```
 
-The arguments of ngx_regex_exec() are: the compiled regular expression re, string to match s, optional array of integers to hold found captures and its size. The captures array size must be a multiple of three, per requirements of the PCRE API. In the example, its size is calculated from a total number of captures plus one for the matched string itself.
+ngx_regex_exec()的参数有：编译了的正则表达式re，待匹配的字符串s，可选的用于存放发现的捕获和其大小的整数数组。捕获数组的大小必须是3的倍数，这是PCRE库的API要求的。在上面例子中，该数组的大小是通过总捕获数加上字符串自身来计算得出的。
 
-Now, if there are matches, captures may be accessed:
+现在，如果成功匹配，则可以对捕获进行访问：
 
 ```
 u_char     *p;
@@ -327,14 +337,14 @@ for (i = 0; i < rc.named_captures; i++, p += size) {
 }
 ```
 
-The ngx_regex_exec_array() function accepts the array of ngx_regex_elt_t elements (which are just compiled regular expressions with associated names), a string to match and a log. The function will apply expressions from the array to the string until the match is found or no more expressions are left. The return value is NGX_OK in case of match and NGX_DECLINED otherwise, or NGX_ERROR in case of error.
+ngx_regex_exec_array()函数接受ngx_regex_elt_t元素的数组（其实就是多个编译好的正则表达式以及对应的名字），一个待匹配字符串以及一个log。该函数会对待匹配字符串逐一应用数组中的正则表达式，直到匹配成功或者无一匹配。存在成功的匹配则返回NGX_OK，否则返回NGX_DECLINED，出错返回NGX_ERROR。
 
-Containers
-==========
+容器
+====
 
-Array
------
-The nginx array type ngx_array_t is defined as follows
+数组
+----
+表示nginx数组（array）的结构体ngx_array_t定义如下：
 
 ```
 typedef struct {
@@ -346,9 +356,10 @@ typedef struct {
 } ngx_array_t;
 ```
 
-The elements of array are available through the elts field. The number of elements is held in the nelts field. The size field holds the size of a single element and is set when initializing the array.
+数组的元素可以通过elts成员获取。元素的个数存放在nelts成员里。size成员记录单个元素的大小，size成员是在数组初始化的时候设置的。
 
-An array can be created in a pool with the ngx_array_create(pool, n, size) call. An already allocated array object can be initialized with the ngx_array_init(array, pool, n, size) call.
+数组可以使用调用ngx_array_create(pool, n, size)来创建，其所需内存在提供的pool中。一个已经分配过内存的数组对象，可以调用ngx_array_init(array, pool, n, size)进行初始化。
+
 
 ```
 ngx_array_t  *a, b;
@@ -360,21 +371,21 @@ a = ngx_array_create(pool, 10, sizeof(ngx_str_t));
 ngx_array_init(&b, pool, 10, sizeof(ngx_str_t));
 ```
 
-Adding elements to array are done with the following functions:
+使用下面的函数向数组添加元素：
 
-* ngx_array_push(a) adds one tail element and returns pointer to it
-* ngx_array_push_n(a, n) adds n tail elements and returns pointer to the first one
+* ngx_array_push(a) 向数组末尾添加一个元素并返回其指针
+* ngx_array_push_n(a, n) 向数组末尾添加n个元素并返回指向其中第一个元素的指针
 
-If currently allocated memory is not enough for new elements, a new memory for elements is allocated and existing elements are copied to that memory. The new memory block is normally twice as large, as the existing one.
+如果现有内存无法满足新元素的需要，数组会分配新的内存并将现有元素复制过去。新分配的内存一般是原有内存的2倍大。
 
 ```
 s = ngx_array_push(a);
 ss = ngx_array_push_n(&b, 3);
 ```
 
-List
+列表
 ----
-List in nginx is a sequence of arrays, optimized for inserting a potentially large number of items. The list type is defined as follows:
+nginx中的列表（List）由一系列的数组组成，并为可能插入大量item进行了优化。列表类型定义如下：
 
 ```
 typedef struct {
@@ -386,7 +397,7 @@ typedef struct {
 } ngx_list_t;
 ```
 
-The actual items are stored in list parts, defined as follows:
+实际的item存放在列表部件结构中，定义如下：
 
 ```
 typedef struct ngx_list_part_s  ngx_list_part_t;
@@ -399,6 +410,8 @@ struct ngx_list_part_s {
 ```
 
 Initially, a list must be initialized by calling ngx_list_init(list, pool, n, size) or created by calling ngx_list_create(pool, n, size). Both functions receive the size of a single item and a number of items per list part. The ngx_list_push(list) function is used to add an item to the list. Iterating over the items is done by direct accessing the list fields, as seen in the example:
+
+使用之前，列表必须通过ngx_list_init(list, pool, n, size)初始化，或者通过ngx_list_create(pool, n, size)创建。两个方式都需要指定单一条目的大小以及每个列表部件中item的数量。ngx_list_push(list)函数用来向列表添加一个item。遍历item是通过直接访问列表成员实现的，参考以下示例：
 
 ```
 ngx_str_t        *v;
@@ -440,9 +453,9 @@ for (i = 0; /* void */; i++) {
 }
 ```
 
-The primary use for the list in nginx is HTTP input and output headers.
+nginx中列表的主要用途是处理HTTP中输入和输出的头部。
 
-The list does not support item removal. However, when needed, items can internally be marked as missing without actual removing from the list. For example, HTTP output headers which are stored as ngx_table_elt_t objects, are marked as missing by setting the hash field of ngx_table_elt_t to zero. Such items are explicitly skipped, when iterating over the headers.
+列表不支持删除item。然而，如果需要的话，可以将item标识成missing而不是真正的删除他们。例如，HTTP的输出头部——以ngx_table_elt_t对象存储——可以通过将ngx_table_elt_t结构的hash成员设置成0来将其标识为missing。这样一来，该HTTP头部就不会被遍历到。
 
 Queue
 -----
@@ -1009,13 +1022,13 @@ Buffer reuse
 ------------
 TODO
 
-Load balancing
---------------
-The ngx_http_upstream_module provides basic functionality to pass requests to remote servers. This functionality is used by modules that implement specific protocols, such as HTTP or FastCGI. The module also provides an interface for creating custom load balancing modules and implements a default round-robin balancing method.
+负载均衡
+-------
+ngx_http_upstream_module提供了向远程服务器发送HTTP请求的基本功能。其他具体的协议模块，例如HTTP或FastCDI，都会使用这个功能。该模块同时还提供了可以定制负载均衡算法的接口并默认实现了round-robin（轮询）算法
 
-Examples of modules that implement alternative load balancing methods are least_conn and hash. Note that these modules are actually implemented as extensions of the upstream module and share a lot of code, such as representation of a server group. The keepalive module is an example of an independent module, extending upstream functionality.
+例如，提供其他的负载均衡算法的模块有least_conn和hash这些。需要注意的是，这些模块实际上是作为upstream模块的扩展而实现的，他们之间共享了大量的代码，比如对于服务器组的表示。keepalive模块是另外一个例子，这是一个独立的模块，扩展了upstream的功能。
 
-The ngx_http_upstream_module may be configured explicitly by placing the corresponding upstream block into the configuration file, or implicitly by using directives that accept a URL evaluated at some point to the list of servers, for example, proxy_pass. Only explicit configurations may use an alternative load balancing method. The upstream module configuration has its own directive context NGX_HTTP_UPS_CONF. The structure is defined as follows:
+ngx_http_upstream_module可以通过在配置文件中配置upstream块来显式配置，或者通过使用可以接受URL作为参数的指令来隐式开启，比如proxy_pass这种指令。只有显示的配置才能选择负载均衡算法。upstream模块有自己的指令上下文NGX_HTTP_UPS_CONF。相关结构体定义如下：
 
 ```
 struct ngx_http_upstream_srv_conf_s {
@@ -1037,21 +1050,21 @@ struct ngx_http_upstream_srv_conf_s {
 };
 ```
 
-* srv_conf — configuration context of upstream modules
-* servers — array of ngx_http_upstream_server_t, the result of parsing a set of server directives in the upstream block
-* flags — flags that mostly mark which features (configured as parameters of the server directive) are supported by the particular load balancing method.
-   * NGX_HTTP_UPSTREAM_CREATE — used to distinguish explicitly defined upstreams from automatically created by proxy_pass and “friends” (FastCGI, SCGI, etc.)
-   * NGX_HTTP_UPSTREAM_WEIGHT — “weight” is supported
-   * NGX_HTTP_UPSTREAM_MAX_FAILS — “max_fails” is supported
-   * NGX_HTTP_UPSTREAM_FAIL_TIMEOUT — “fail_timeout” is supported
-   * NGX_HTTP_UPSTREAM_DOWN — “down” is supported
-   * NGX_HTTP_UPSTREAM_BACKUP — “backup” is supported
-   * NGX_HTTP_UPSTREAM_MAX_CONNS — “max_conns” is supported
-* host — the name of an upstream
-* file_name, line — the name of the configuration file and the line where the upstream block is located
-* port and no_port — unused by explicit upstreams
-* shm_zone — a shared memory zone used by this upstream, if any
-* peer — an object that holds generic methods for initializing upstream configuration:
+* srv_conf — upstream模块的配置上下文
+* servers — ngx_http_upstream_server_t的数组，存放的是对upstream块中一组server指令解析的配置
+* flags — 指定特定负载均衡算法支持哪些特性（通过server指令的参数配置）的标记位。
+   * NGX_HTTP_UPSTREAM_CREATE — 用来区分显式定义的upstream和通过proxy_pass类型指令(FastCGI, SCGI等)隐式创建的upstream
+   * NGX_HTTP_UPSTREAM_WEIGHT — 支持“weight”
+   * NGX_HTTP_UPSTREAM_MAX_FAILS — 支持“max_fails”
+   * NGX_HTTP_UPSTREAM_FAIL_TIMEOUT — 支持“fail_timeout”
+   * NGX_HTTP_UPSTREAM_DOWN — 支持“down”
+   * NGX_HTTP_UPSTREAM_BACKUP — 支持“backup”
+   * NGX_HTTP_UPSTREAM_MAX_CONNS — 支持“max_conns”
+* host — upstream的名字
+* file_name, line — 配置文件名字以及upstream块所在行
+* port and no_port — 显式upstream未使用
+* shm_zone — 此upstream使用的共享内存
+* peer — 存放用来初始化upstream配置通用方法的对象：
 
 ```
 typedef struct {
@@ -1061,11 +1074,13 @@ typedef struct {
 } ngx_http_upstream_peer_t;
 ```
 
-A module that implements a load balancing algorithm must set these methods and initialize private data. If init_upstream was not initialized during configuration parsing, ngx_http_upstream_module sets it to default ngx_http_upstream_init_round_robin.
-   * init_upstream(cf, us) — configuration-time method responsible for initializing a group of servers and initializing the init() method in case of success. A typical load balancing module uses a list of servers in the upstream block to create some efficient data structure that it uses and saves own configuration to the data field.
-   * init(r, us) — initializes per-request ngx_http_upstream_peer_t.peer (not to be confused with the ngx_http_upstream_srv_conf_t.peer described above which is per-upstream) structure that is used for load balancing. It will be passed as data argument to all callbacks that deal with server selection.
-   
-When nginx has to pass a request to another host for processing, it uses a configured load balancing method to obtain an address to connect to. The method is taken from the ngx_http_upstream_peer_t.peer object of type ngx_peer_connection_t:
+实现负载均衡算法的模块必须设置这些方法并初始化私有数据。
+如果init_upstream在配置阶段没有初始化，ngx_http_upstream_module会将其默认设置成ngx_http_upstream_init_round_robin。
+
+   * init_upstream(cf, us) — 配置阶段方法，用于初始化一组服务器并初始化init()方法。一个典型的负载均衡模块使用upstream块中的一组服务器来创建某种有效的数据结构并在data成员中存放自身的配置。
+   * init(r, us) — 初始化用于每个请求的ngx_http_upstream_peer_t.peer (不要和之前用于每个upstream的ngx_http_upstream_srv_conf_t.peer搞混了)结构，该结构用于进行负载均衡。该结构会作为所有处理服务器选择的回调函数的data参数传递。
+
+当nginx需要将请求转给其他服务器进行处理时，它会调用配置好的负载均衡算法来选择一个地址，并发起连接。选择算法是从ngx_http_upstream_peer_t.peer对象中获取的，该对象的类型是ngx_peer_connection_t：
 
 ```
 struct ngx_peer_connection_s {
@@ -1091,21 +1106,21 @@ struct ngx_peer_connection_s {
 };
 ```
 
-The structure has the following fields:
+这个结构体有如下成员：
 
-* sockaddr, socklen, name — address of an upstream server to connect to; this is the output parameter of a load balancing method
-* data — per-request load balancing method data; keeps the state of selection algorithm and usually includes the link to upstream configuration. It will be passed as an argument to all methods that deal with server selection (see below)
-* tries — allowed number of attempts to connect to an upstream.
-* get, free, notify, set_session, and save_session - methods of the load balancing module, see description below
+* sockaddr, socklen, name — 待连接的upstream服务器的地址；此为负载均衡算法的输出参数
+* data — 每请求的负载均衡算法所需数据；记录选择算法的状态并且通常会含有指向upstream配置的指针。此data会被作为参数传递给所有处理服务器选择的函数（见下文）
+* tries — 连接upstream服务器的重试次数
+* get, free, notify, set_session, and save_session - 负载均衡算法模块的方法，详细见下文
 
-All methods accept at least two arguments: peer connection object pc and the data created by ngx_http_upstream_srv_conf_t.peer.init(). Note that in general case it may differ from pc.data due to “chaining” of load balancing modules.
+所有的方法至少接受两个参数：peer连接对象pc以及由ngx_http_upstream_srv_conf_t.peer.init()创建的data参数。注意，一般来说，由于负载均衡算法的”chaining”，这个data和pc.data是不同的，
 
-* get(pc, data) — the method is called when the upstream module is ready to pass a request to an upstream server and needs to know its address. The method is responsible to fill in the sockaddr, socklen, and name fields of ngx_peer_connection_t structure. The return value may be one of:
-   * NGX_OK — server was selected
-   * NGX_ERROR — internal error occurred
-   * NGX_BUSY — there are no available servers at the moment. This can happen due to many reasons, such as: dynamic server group is empty, all servers in the group are in the failed state, all servers in the group are already handling the maximum number of connections or similar.
-   * NGX_DONE — this is set by the keepalive module to indicate that the underlying connection was reused and there is no need to create a new connection to the upstream server.
-* free(pc, data, state) — the method is called when an upstream module has finished work with a particular server. The state argument is the status of upstream connection completion. This is a bitmask, the following values may be set: NGX_PEER_FAILED — this attempt is considered unsuccessful, NGX_PEER_NEXT — a special case with codes 403 and 404 (see link above), which are not considered a failure. NGX_PEER_KEEPALIVE. Also, tries counter is decremented by this method.
-* notify(pc, data, type) — currently unused in the OSS version.
-* set_session(pc, data) and save_session(pc, data) — SSL-specific methods that allow to cache sessions to upstream servers. The implementation is provided by the round-robin balancing method.
+* get(pc, data) — 当upstream模块需要将请求发送给一个服务器而需要知道服务器地址的时候，该方法会被调用。该方法负责填写ngx_peer_connection_t结构的sockaddr，socklen和name成员。返回值有如下几种：
+   * NGX_OK — 服务器已选择
+   * NGX_ERROR — 发生了内部错误
+   * NGX_BUSY — 当前没有可用服务器。有多种原因会导致这个情况的发生，例如：动态服务器组为空，全部服务器均为失败状态，全部服务器已经达到最大连接数或者其他类似情况。
+   * NGX_DONE — keepalive模块用这个返回值来说明底层连接进行了复用，因此不需要和upstream服务器间创建一条新连接。
+* free(pc, data, state) — 当upstream模块同某个upstream服务器通信结束后，调用此方法。state参数指示了upstream连接的完成状态，是一个bitmask，可以被设置成这些值：NGX_PEER_FAILED - 失败，NGX_PEER_NEXT - 403和404的特殊情况，不作为失败对待，NGX_PEER_KEEPALIVE。此外，尝试次数也在这个方法递减。
+* notify(pc, data, type) — 开源版本中未使用。
+* set_session(pc, data)和save_session(pc, data) — SSL相关方法，用于缓存同upstream服务器间的SSL会话，由round-robin负载均衡算法实现。
 
