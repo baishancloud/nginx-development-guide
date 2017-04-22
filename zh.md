@@ -1551,11 +1551,91 @@ HTTP
 
 Connection
 ----------
-TODO
+
+Each client HTTP connection runs through the following stages:
+
+* ngx_event_accept() accepts a client TCP connection. This handler is called in response to a read noti
+fication on a listen socket. A new ngx_connecton_t object is created at this stage. The object wraps th
+e newly accepted client socket. Each nginx listener provides a handler to pass the new connection objec
+t to. For HTTP connections it's ngx_http_init_connection(c)
+* ngx_http_init_connection() performs early initialization of an HTTP connection. At this stage an ngx_
+http_connection_t object is created for the connection and its reference is stored in connection's data
+ field. Later it will be substituted with an HTTP request object. PROXY protocol parser and SSL handsha
+ke are started at this stage as well
+* ngx_http_wait_request_handler() is a read event handler, that is called when data is available in the
+ client socket. At this stage an HTTP request object ngx_http_request_t is created and set to connectio
+n's data field
+* ngx_http_process_request_line() is a read event handler, which reads client request line. The handler
+ is set by ngx_http_wait_request_handler(). Reading is done into connection's buffer. The size of the b
+uffer is initially set by the directive client_header_buffer_size. The entire client header is supposed
+ to fit the buffer. If the initial size is not enough, a bigger buffer is allocated, whose size is set
+by the large_client_header_buffers directive
+* ngx_http_process_request_headers() is a read event handler, which is set after ngx_http_process_reque
+st_line() to read client request header
+* ngx_http_core_run_phases() is called when the request header is completely read and parsed. This func
+tion runs request phases from NGX_HTTP_POST_READ_PHASE to NGX_HTTP_CONTENT_PHASE. The last phase is sup
+posed to generate response and pass it along the filter chain. The response in not necessarily sent to
+the client at this phase. It may remain buffered and will be sent at the finalization stage
+* ngx_http_finalize_request() is usually called when the request has generated all the output or produc
+ed an error. In the latter case an appropriate error page is looked up and used as the response. If the
+ response is not completely sent to the client by this point, an HTTP writer ngx_http_writer() is activ
+ated to finish sending outstanding data
+* ngx_http_finalize_connection() is called when the response is completely sent to the client and the r
+equest can be destroyed. If client connection keepalive feature is enabled, ngx_http_set_keepalive() is
+ called, which destroys current request and waits for the next request on the connection. Otherwise, ng
+x_http_close_request() destroys both the request and the connection
 
 Request
 -------
-TODO
+
+For each client HTTP request the ngx_http_request_t object is created. Some of the fields of this object:
+
+* connection — pointer to a ngx_connection_t client connection object. Several requests may reference the same connection object at the same time - one main request and its subrequests. After a request is deleted, a new request may be created on the same connection.
+
+    Note that for HTTP connections ngx_connection_t's data field points back to the request. Such request is called active, as opposed to the other requests tied with the connection. Active request is used to handle client connection events and is allowed to output its response to the client. Normally, each request becomes active at some point to be able to send its output
+
+* ctx — array of HTTP module contexts. Each module of type NGX_HTTP_MODULE can store any value (normally, a pointer to a structure) in the request. The value is stored in the ctx array at the module's ctx_index position. The following macros provide a convenient way to get and set request contexts:
+
+    * ngx_http_get_module_ctx(r, module) — returns module's context
+    * ngx_http_set_ctx(r, c, module) — sets c as module's context
+* main_conf, srv_conf, loc_conf — arrays of current request configurations. Configurations are stored at module's ctx_index positions
+* read_event_handler, write_event_handler - read and write event handlers for the request. Normally, an HTTP connection has ngx_http_request_handler() set as both read and write event handlers. This function calls read_event_handler and write_event_handler handlers of the currently active request
+* cache — request cache object for caching upstream response
+* upstream — request upstream object for proxying
+* pool — request pool. This pool is destroyed when the request is deleted. The request object itself is allocated in this pool. For allocations which should be available throughout the client connection's lifetime, ngx_connection_t's pool should be used instead
+* header_in — buffer where client HTTP request header in read
+* headers_in, headers_out — input and output HTTP headers objects. Both objects contain the headers field of type ngx_list_t keeping the raw list of headers. In addition to that, specific headers are available for getting and setting as separate fields, for example content_length_n, status etc
+* request_body — client request body object
+* start_sec, start_msec — time point when the request was created. Used for tracking request duration
+* method, method_name — numeric and textual representation of client HTTP request method. Numeric values for methods are defined in src/http/ngx_http_request.h with macros NGX_HTTP_GET, NGX_HTTP_HEAD, NGX_HTTP_POST etc
+* http_protocol, http_version, http_major, http_minor - client HTTP protocol version in its original textual form (“HTTP/1.0”, “HTTP/1.1” etc), numeric form (NGX_HTTP_VERSION_10, NGX_HTTP_VERSION_11 etc) and separate major and minor versions
+* request_line, unparsed_uri — client original request line and URI
+* uri, args, exten — current request URI, arguments and file extention. The URI value here might differ from the original URI sent by the client due to normalization. Throughout request processing, these value can change while performing internal redirects
+* main — pointer to a main request object. This object is created to process client HTTP request, as opposed to subrequests, created to perform a specific sub-task within the main request
+* parent — pointer to a parent request of a subrequest
+* postponed — list of output buffers and subrequests in the order they are sent and created. The list is used by the postpone filter to provide consistent request output, when parts of it are created by subrequests
+* post_subrequest — pointer to a handler with context to be called when a subrequest gets finalized. Unused for main requests
+* posted_requests — list of requests to be started or resumed. Starting or resuming is done by calling the request's write_event_handler. Normally, this handler holds the request main function, which at first runs request phases and then produces the output.
+
+    A request is usually posted by the ngx_http_post_request(r, NULL) call. It is always posted to the main request posted_requests list. The function ngx_http_run_posted_requests(c) runs all requests, posted in the main request of the passed connection's active request. This function should be called in all event handlers, which can lead to new posted requests. Normally, it's called always after invoking a request's read or write handler
+
+* phase_handler — index of current request phase
+* ncaptures, captures, captures_data — regex captures produced by the last regex match of the request. While processing a request, there's a number of places where a regex match can happen: map lookup, server lookup by SNI or HTTP Host, rewrite, proxy_redirect etc. Captures produced by a lookup are stored in the above mentioned fields. The field ncaptures holds the number of captures, captures holds captures boundaries, captures_data holds a string, against which the regex was matched and which should be used to extract captures. After each new regex match request captures are reset to hold new values
+* count — request reference counter. The field only makes sense for the main request. Increasing the counter is done by simple r->main->count++. To decrease the counter ngx_http_finalize_request(r, rc) should be called. Creation of a subrequest or running request body read process increase the counter
+* subrequests — current subrequest nesting level. Each subrequest gets the nesting level of its parent decreased by one. Once the value reaches zero an error is generated. The value for the main request is defined by the NGX_HTTP_MAX_SUBREQUESTS constant
+* uri_changes — number of URI changes left for the request. The total number of times a request can change its URI is limited by the NGX_HTTP_MAX_URI_CHANGES constant. With each change the value is decreased until it reaches zero. In the latter case an error is generated. The actions considered as URI changes are rewrites and internal redirects to normal or named locations
+* blocked — counter of blocks held on the request. While this value is non-zero, request cannot be terminated. Currently, this value is increased by pending AIO operations (POSIX AIO and thread operations) and active cache lock
+* buffered — bitmask showing which modules have buffered the output produced by the request. A number of filters can buffer output, for example sub_filter can buffer data due to a partial string match, copy filter can buffer data because of the lack of free output_buffers etc. As long as this value is non-zero, request is not finalized, expecting the flush
+* header_only — flag showing that output does not require body. For example, this flag is used by HTTP HEAD requests
+* keepalive — flag showing if client connection keepalive is supported. The value is inferred from HTTP version and “Connection” header value
+
+* header_sent — flag showing that output header has already been sent by the request
+* internal — flag showing that current request is internal. To enter the internal state, a request should pass through an internal redirect or be a subrequest. Internal requests are allowed to enter internal locations
+* allow_ranges — flag showing that partial response can be sent to client, if requested by the HTTP Range header
+* subrequest_ranges — flag showing that a partial response is allowed to be sent while processing a subrequest
+* single_range — flag showing that only a single continuous range of output data can be sent to the client. This flag is usually set when sending a stream of data, for example from a proxied server, and the entire response is not available at once
+* main_filter_need_in_memory, filter_need_in_memory — flags showing that the output should be produced in memory buffers but not in files. This is a signal to the copy filter to read data from file buffers even if sendfile is enabled. The difference between these two flags is the location of filter modules which set them. Filters called before the postpone filter in filter chain, set filter_need_in_memory requesting that only the current request output should come in memory buffers. Filters called later in filter chain set main_filter_need_in_memory requiring that both the main request and all the subrequest read files in memory while sending output
+* filter_need_temporary — flag showing that the request output should be produced in temporary buffers, but not in readonly memory buffers or file buffers. This is used by filters which may change output directly in the buffers, where it's sent
 
 Configuration
 -------------
