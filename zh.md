@@ -409,8 +409,6 @@ struct ngx_list_part_s {
 };
 ```
 
-Initially, a list must be initialized by calling ngx_list_init(list, pool, n, size) or created by calling ngx_list_create(pool, n, size). Both functions receive the size of a single item and a number of items per list part. The ngx_list_push(list) function is used to add an item to the list. Iterating over the items is done by direct accessing the list fields, as seen in the example:
-
 使用之前，列表必须通过ngx_list_init(list, pool, n, size)初始化，或者通过ngx_list_create(pool, n, size)创建。两个方式都需要指定单一条目的大小以及每个列表部件中item的数量。ngx_list_push(list)函数用来向列表添加一个item。遍历item是通过直接访问列表成员实现的，参考以下示例：
 
 ```
@@ -457,10 +455,10 @@ nginx中列表的主要用途是处理HTTP中输入和输出的头部。
 
 列表不支持删除item。然而，如果需要的话，可以将item标识成missing而不是真正的删除他们。例如，HTTP的输出头部——以ngx_table_elt_t对象存储——可以通过将ngx_table_elt_t结构的hash成员设置成0来将其标识为missing。这样一来，该HTTP头部就不会被遍历到。
 
-Queue
------
+队列
+----
 
-Queue in nginx is an intrusive doubly linked list, with each node defined as follows:
+nginx里的队列是一个双向链表，每个节点定义如下：
 
 ```
 typedef struct ngx_queue_s  ngx_queue_t;
@@ -471,17 +469,17 @@ struct ngx_queue_s {
 };
 ```
 
-The head queue node is not linked with any data. Before using, the list head should be initialized with ngx_queue_init(q) call. Queues support the following operations:
+头部队列节点没有连接任何数据。使用之前，列表头部要先调用 ngx_queue_init(q) 以初始化。队列支持如下操作：
 
-* ngx_queue_insert_head(h, x), ngx_queue_insert_tail(h, x) — insert a new node
-* ngx_queue_remove(x) — remove a queue node
-* ngx_queue_split(h, q, n) — split a queue at a node, queue tail is returned in a separate queue
-* ngx_queue_add(h, n) — add second queue to the first queue
-* ngx_queue_head(h), ngx_queue_last(h) — get first or last queue node
-* ngx_queue_sentinel(h) - get a queue sentinel object to end iteration at
-* ngx_queue_data(q, type, link) — get reference to the beginning of a queue node data structure, consid ering the queue field offset in it
+* ngx_queue_insert_head(h, x), ngx_queue_insert_tail(h, x) — 插入新节点
+* ngx_queue_remove(x) — 删除队列节点
+* ngx_queue_split(h, q, n) — 从a节点切割，队列尾部起将变成新的独立的队列
+* ngx_queue_add(h, n) — 将队列n加到队列h
+* ngx_queue_head(h), ngx_queue_last(h) — 返回首或尾队列节点
+* ngx_queue_sentinel(h) - 返回队列哨兵用来结束迭代
+* ngx_queue_data(q, type, link) — 返回指向queue的data字段的起始地址，根据它的queue字段的偏移量
 
-Example:
+例子：
 
 ```
 typedef struct {
@@ -512,11 +510,10 @@ for (q = ngx_queue_head(&values);
 }
 ```
 
-Red-Black tree
---------------
+红黑树
+------
 
-The src/core/ngx_rbtree.h header file provides access to the effective implementation of red-black tree
-s.
+头文件 src/core/ngx_rbtree.h 提供了访问红黑树的定义。
 
 ```
 typedef struct {
@@ -534,11 +531,9 @@ typedef struct {
 } my_node_t;
 ```
 
-To deal with a tree as a whole, you need two nodes: root and sentinel. Typically, they are added to som
-e custom structure, thus allowing to organize your data into a tree which leaves contain a link to or e
-mbed your data.
+为了处理整个树，需要两个节点：root 和 sentinel。通常他们被添加到某些自定义的结构中，这样就能将数据组织到树中，其中包含指向数据的边接。
 
-To initialize a tree:
+初始化树：
 
 ```
 my_tree_t  root;
@@ -546,9 +541,7 @@ my_tree_t  root;
 ngx_rbtree_init(&root.rbtree, &root.sentinel, insert_value_function);
 ```
 
-The insert_value_function is a function that is responsible for traversing the tree and inserting new v
-alues into correct place. For example, the ngx_str_rbtree_insert_value functions is designed to deal wi
-th ngx_str_t type.
+The insert_value_function is a function that is responsible for traversing the tree and inserting new values into correct place. For example, the ngx_str_rbtree_insert_value functions is designed to deal with ngx_str_t type.
 
 ```
 void ngx_str_rbtree_insert_value(ngx_rbtree_node_t *temp,
@@ -556,11 +549,9 @@ void ngx_str_rbtree_insert_value(ngx_rbtree_node_t *temp,
                                  ngx_rbtree_node_t *sentinel)
 ```
 
-Its arguments are pointers to a root node of an insertion, newly created node to be added, and a tree s
-entinel.
+第一个参数是树中插入的节点，第二个是新创建的用来添加的节点，最后一个是树的sentinel。
 
-The traversal is pretty straightforward and can be demonstrated with the following lookup function patt
-ern:
+遍历非常简单明了，用下面的轮询函数模式作为演示。
 
 ```
 my_node_t *
@@ -601,10 +592,9 @@ my_rbtree_lookup(ngx_rbtree_t *rbtree, foo_t *val, uint32_t hash)
 }
 ```
 
-The compare() is a classic comparator function returning value less, equal or greater than zero. To spe
-ed up lookups and avoid comparing user objects that can be big, integer hash field is used.
+compare() 是一个返回较小，相等或较大的经典函数。为了更快的查找，并且避免比较太大的对象，整型的hash字段就派上用场了。
 
-To add a node to a tree, allocate a new node, initialize it and call ngx_rbtree_insert():
+为了添加节点到树，需要分配新节点，初始化它，然后调用 ngx_rbtree_insert()：
 
 ```
     my_node_t          *my_node;
@@ -625,17 +615,12 @@ to remove a node:
 ngx_rbtree_delete(&root->rbtree, node);
 ```
 
-Hash
+哈希
 ----
 
-Hash table functions are declared in src/core/ngx_hash.h. Exact and wildcard matching is supported. The
- latter requires extra setup and is described in a separate section below.
+唏希表定义在 src/core/ngx_hash.h，支持精确和通配符匹配。后者需要额外的处理，放在下面的章节专门描述。
 
-To initialize a hash, one needs to know the number of elements in advance, so that nginx can build the
-hash optimally. Two parameters that need to be configured are max_size and bucket_size. The details of
-setting up these are provided in a separate document. Usually, these two parameters are configurable by
- user. Hash initialization settings are stored as the ngx_hash_init_t type, and the hash itself is ngx_
-hash_t:
+初始化哈希时，我们需要提前知道元素的个数，以便nginx能更好的优化哈希表。max_size 和 bucket_size 这两参数需要配置。细节详见官方提供的文档。通常这两参数会做成用户可配置的。哈希初始化的设置放在ngx_hash_init_t类型的存储中。而哈希表本身的类型是 ngx_hash_t。
 
 ```
 ngx_hash_t       foo_hash;
@@ -650,13 +635,9 @@ hash.pool = cf->pool;
 hash.temp_pool = cf->temp_pool;
 ```
 
-The key is a pointer to a function that creates hash integer key from a string. Two generic functions a
-re provided: ngx_hash_key(data, len) and ngx_hash_key_lc(data, len). The latter converts a string to lo
-wercase and thus requires the passed string to be writable. If this is not true, NGX_HASH_READONLY_KEY
-flag may be passed to the function, initializing array keys (see below).
+key是一个指向能根据字符串创建整型的函数的指针。nginx提供了两个通用的函数：ngx_hash_key(data, len) 和 ngx_hash_key_lc(data, len)。后者将字符串转为小写，这需要这个字符串是可写的。如果不想这样，NGX_HASH_READONLY_KEY 标记可以传给这个函数，然后初始化数组键（见下文）。
 
-The hash keys are stored in ngx_hash_keys_arrays_t and are initialized with ngx_hash_keys_array_init(ar
-r, type):
+哈希keys保存在ngx_hash_keys_arrays_t里，然后通过 ngx_hash_keys_array_init(arr, type) 初始化。
 
 ```
 ngx_hash_keys_arrays_t  foo_keys;
@@ -667,11 +648,9 @@ foo_keys.temp_pool = cf->temp_pool;
 ngx_hash_keys_array_init(&foo_keys, NGX_HASH_SMALL);
 ```
 
-The second parameter can be either NGX_HASH_SMALL or NGX_HASH_LARGE and controls the amount of prealloc
-ated resources for the hash. If you expect the hash to contain thousands elements, use NGX_HASH_LARGE.
+第二个参数可以是NGX_HASH_SMALL或者NGX_HASH_LARGE，用于控制哈希表的预分配。如果你想hash包含更多的无素，请用NGX_HASH_LARGE。
 
-The ngx_hash_add_key(keys_array, key, value, flags) function is used to insert keys into hash keys arra
-y;
+ngx_hash_add_key(keys_array, key, value, flags) 函数用于将key添加到hash keys array：
 
 ```
 ngx_str_t k1 = ngx_string("key1");
@@ -681,14 +660,13 @@ ngx_hash_add_key(&foo_keys, &k1, &my_data_ptr_1, NGX_HASH_READONLY_KEY);
 ngx_hash_add_key(&foo_keys, &k2, &my_data_ptr_2, NGX_HASH_READONLY_KEY);
 ```
 
-Now, the hash table may be built using the call to ngx_hash_init(hinit, key_names, nelts):
+现在就可能通过调用 ngx_hash_init(hinit, key_names, nelts) 来完成hash表的创建：
 
 ```
 ngx_hash_init(&hash, foo_keys.keys.elts, foo_keys.keys.nelts);
 ```
 
-This may fail, if max_size or bucket_size parameters are not big enough. When the hash is built, ngx_ha
-sh_find(hash, key, name, len) function may be used to look up elements:
+这样是有可能错误的，如果max_size或者bucket_size不足够大的话。当hash创建了之后， ngx_hash_find(hash, key, name, len) 函数可用来查找无素：
 
 ```
 my_data_t   *data;
