@@ -459,30 +459,513 @@ nginx中列表的主要用途是处理HTTP中输入和输出的头部。
 
 Queue
 -----
-TODO
+
+Queue in nginx is an intrusive doubly linked list, with each node defined as follows:
+
+```
+typedef struct ngx_queue_s  ngx_queue_t;
+
+struct ngx_queue_s {
+    ngx_queue_t  *prev;
+    ngx_queue_t  *next;
+};
+```
+
+The head queue node is not linked with any data. Before using, the list head should be initialized with ngx_queue_init(q) call. Queues support the following operations:
+
+* ngx_queue_insert_head(h, x), ngx_queue_insert_tail(h, x) — insert a new node
+* ngx_queue_remove(x) — remove a queue node
+* ngx_queue_split(h, q, n) — split a queue at a node, queue tail is returned in a separate queue
+* ngx_queue_add(h, n) — add second queue to the first queue
+* ngx_queue_head(h), ngx_queue_last(h) — get first or last queue node
+* ngx_queue_sentinel(h) - get a queue sentinel object to end iteration at
+* ngx_queue_data(q, type, link) — get reference to the beginning of a queue node data structure, consid ering the queue field offset in it
+
+Example:
+
+```
+typedef struct {
+    ngx_str_t    value;
+    ngx_queue_t  queue;
+} ngx_foo_t;
+
+ngx_foo_t    *f;
+ngx_queue_t   values;
+
+ngx_queue_init(&values);
+
+f = ngx_palloc(pool, sizeof(ngx_foo_t));
+if (f == NULL) { /* error */ }
+ngx_str_set(&f->value, "foo");
+
+ngx_queue_insert_tail(&values, f);
+
+/* insert more nodes here */
+
+for (q = ngx_queue_head(&values);
+     q != ngx_queue_sentinel(&values);
+     q = ngx_queue_next(q))
+{
+    f = ngx_queue_data(q, ngx_foo_t, queue);
+
+    ngx_do_smth(&f->value);
+}
+```
 
 Red-Black tree
 --------------
-TODO
+
+The src/core/ngx_rbtree.h header file provides access to the effective implementation of red-black tree
+s.
+
+```
+typedef struct {
+    ngx_rbtree_t       rbtree;
+    ngx_rbtree_node_t  sentinel;
+
+    /* custom per-tree data here */
+} my_tree_t;
+
+typedef struct {
+    ngx_rbtree_node_t  rbnode;
+
+    /* custom per-node data */
+    foo_t              val;
+} my_node_t;
+```
+
+To deal with a tree as a whole, you need two nodes: root and sentinel. Typically, they are added to som
+e custom structure, thus allowing to organize your data into a tree which leaves contain a link to or e
+mbed your data.
+
+To initialize a tree:
+
+```
+my_tree_t  root;
+
+ngx_rbtree_init(&root.rbtree, &root.sentinel, insert_value_function);
+```
+
+The insert_value_function is a function that is responsible for traversing the tree and inserting new v
+alues into correct place. For example, the ngx_str_rbtree_insert_value functions is designed to deal wi
+th ngx_str_t type.
+
+```
+void ngx_str_rbtree_insert_value(ngx_rbtree_node_t *temp,
+                                 ngx_rbtree_node_t *node,
+                                 ngx_rbtree_node_t *sentinel)
+```
+
+Its arguments are pointers to a root node of an insertion, newly created node to be added, and a tree s
+entinel.
+
+The traversal is pretty straightforward and can be demonstrated with the following lookup function patt
+ern:
+
+```
+my_node_t *
+my_rbtree_lookup(ngx_rbtree_t *rbtree, foo_t *val, uint32_t hash)
+{
+    ngx_int_t           rc;
+    my_node_t          *n;
+    ngx_rbtree_node_t  *node, *sentinel;
+
+    node = rbtree->root;
+    sentinel = rbtree->sentinel;
+
+    while (node != sentinel) {
+
+        n = (my_node_t *) node;
+
+        if (hash != node->key) {
+            node = (hash < node->key) ? node->left : node->right;
+            continue;
+        }
+
+        rc = compare(val, node->val);
+
+        if (rc < 0) {
+            node = node->left;
+            continue;
+        }
+
+        if (rc > 0) {
+            node = node->right;
+            continue;
+        }
+
+        return n;
+    }
+
+    return NULL;
+}
+```
+
+The compare() is a classic comparator function returning value less, equal or greater than zero. To spe
+ed up lookups and avoid comparing user objects that can be big, integer hash field is used.
+
+To add a node to a tree, allocate a new node, initialize it and call ngx_rbtree_insert():
+
+```
+    my_node_t          *my_node;
+    ngx_rbtree_node_t  *node;
+
+    my_node = ngx_palloc(...);
+    init_custom_data(&my_node->val);
+
+    node = &my_node->rbnode;
+    node->key = create_key(my_node->val);
+
+    ngx_rbtree_insert(&root->rbtree, node);
+```
+
+to remove a node:
+
+```
+ngx_rbtree_delete(&root->rbtree, node);
+```
 
 Hash
 ----
-TODO
+
+Hash table functions are declared in src/core/ngx_hash.h. Exact and wildcard matching is supported. The
+ latter requires extra setup and is described in a separate section below.
+
+To initialize a hash, one needs to know the number of elements in advance, so that nginx can build the
+hash optimally. Two parameters that need to be configured are max_size and bucket_size. The details of
+setting up these are provided in a separate document. Usually, these two parameters are configurable by
+ user. Hash initialization settings are stored as the ngx_hash_init_t type, and the hash itself is ngx_
+hash_t:
+
+```
+ngx_hash_t       foo_hash;
+ngx_hash_init_t  hash;
+
+hash.hash = &foo_hash;
+hash.key = ngx_hash_key;
+hash.max_size = 512;
+hash.bucket_size = ngx_align(64, ngx_cacheline_size);
+hash.name = "foo_hash";
+hash.pool = cf->pool;
+hash.temp_pool = cf->temp_pool;
+```
+
+The key is a pointer to a function that creates hash integer key from a string. Two generic functions a
+re provided: ngx_hash_key(data, len) and ngx_hash_key_lc(data, len). The latter converts a string to lo
+wercase and thus requires the passed string to be writable. If this is not true, NGX_HASH_READONLY_KEY
+flag may be passed to the function, initializing array keys (see below).
+
+The hash keys are stored in ngx_hash_keys_arrays_t and are initialized with ngx_hash_keys_array_init(ar
+r, type):
+
+```
+ngx_hash_keys_arrays_t  foo_keys;
+
+foo_keys.pool = cf->pool;
+foo_keys.temp_pool = cf->temp_pool;
+
+ngx_hash_keys_array_init(&foo_keys, NGX_HASH_SMALL);
+```
+
+The second parameter can be either NGX_HASH_SMALL or NGX_HASH_LARGE and controls the amount of prealloc
+ated resources for the hash. If you expect the hash to contain thousands elements, use NGX_HASH_LARGE.
+
+The ngx_hash_add_key(keys_array, key, value, flags) function is used to insert keys into hash keys arra
+y;
+
+```
+ngx_str_t k1 = ngx_string("key1");
+ngx_str_t k2 = ngx_string("key2");
+
+ngx_hash_add_key(&foo_keys, &k1, &my_data_ptr_1, NGX_HASH_READONLY_KEY);
+ngx_hash_add_key(&foo_keys, &k2, &my_data_ptr_2, NGX_HASH_READONLY_KEY);
+```
+
+Now, the hash table may be built using the call to ngx_hash_init(hinit, key_names, nelts):
+
+```
+ngx_hash_init(&hash, foo_keys.keys.elts, foo_keys.keys.nelts);
+```
+
+This may fail, if max_size or bucket_size parameters are not big enough. When the hash is built, ngx_ha
+sh_find(hash, key, name, len) function may be used to look up elements:
+
+```
+my_data_t   *data;
+ngx_uint_t   key;
+
+key = ngx_hash_key(k1.data, k1.len);
+
+data = ngx_hash_find(&foo_hash, key, k1.data, k1.len);
+if (data == NULL) {
+    /* key not found */
+}
+```
+
+Wildcard matching
+-----------------
+
+To create a hash that works with wildcards, ngx_hash_combined_t type is used. It includes the hash type
+ described above and has two additional keys arrays: dns_wc_head and dns_wc_tail. The initialization of
+ basic properties is done similarly to a usual hash:
+
+```
+ngx_hash_init_t      hash
+ngx_hash_combined_t  foo_hash;
+
+hash.hash = &foo_hash.hash;
+hash.key = ...;
+```
+
+It is possible to add wildcard keys using the NGX_HASH_WILDCARD_KEY flag:
+
+```
+/* k1 = ".example.org"; */
+/* k2 = "foo.*";        */
+ngx_hash_add_key(&foo_keys, &k1, &data1, NGX_HASH_WILDCARD_KEY);
+ngx_hash_add_key(&foo_keys, &k2, &data2, NGX_HASH_WILDCARD_KEY);
+```
+
+The function recognizes wildcards and adds keys into corresponding arrays. Please refer to the map modu
+le documentation for the description of the wildcard syntax and matching algorithm.
+
+Depending on the contents of added keys, you may need to initialize up to three keys arrays: one for ex
+act matching (described above), and two for matching starting from head or tail of a string:
+
+```
+if (foo_keys.dns_wc_head.nelts) {
+
+    ngx_qsort(foo_keys.dns_wc_head.elts,
+              (size_t) foo_keys.dns_wc_head.nelts,
+              sizeof(ngx_hash_key_t),
+              cmp_dns_wildcards);
+
+    hash.hash = NULL;
+    hash.temp_pool = pool;
+
+    if (ngx_hash_wildcard_init(&hash, foo_keys.dns_wc_head.elts,
+                               foo_keys.dns_wc_head.nelts)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    foo_hash.wc_head = (ngx_hash_wildcard_t *) hash.hash;
+}
+```
+
+The keys array needs to be sorted, and initialization results must be added to the combined hash. The i
+nitialization of dns_wc_tail array is done similarly.
+
+The lookup in a combined hash is handled by the ngx_hash_find_combined(chash, key, name, len):
+
+```
+/* key = "bar.example.org"; — will match ".example.org" */
+/* key = "foo.example.com"; — will match "foo.*"        */
+
+hkey = ngx_hash_key(key.data, key.len);
+res = ngx_hash_find_combined(&foo_hash, hkey, key.data, key.len);
+```
 
 Memory management
 =================
 
 Heap
 ----
-TODO
+
+To allocate memory from system heap, the following functions are provided by nginx:
+
+* ngx_alloc(size, log) — allocate memory from system heap. This is a wrapper around malloc() with loggi
+ng support. Allocation error and debugging information is logged to log
+ngx_calloc(size, log) — same as ngx_alloc(), but memory is filled with zeroes after allocation
+* ngx_memalign(alignment, size, log) — allocate aligned memory from system heap. This is a wrapper arou
+nd posix_memalign() on those platforms which provide it. Otherwise implementation falls back to ngx_all
+oc() which provides maximum alignment
+ngx_free(p) — free allocated memory. This is a wrapper around free()
 
 Pool
 ----
-TODO
+
+Most nginx allocations are done in pools. Memory allocated in an nginx pool is freed automatically when
+ the pool in destroyed. This provides good allocation performance and makes memory control easy.
+
+A pool internally allocates objects in continuous blocks of memory. Once a block is full, a new one is
+allocated and added to the pool memory block list. When a large allocation is requested which does not
+fit into a block, such allocation is forwarded to the system allocator and the returned pointer is stor
+ed in the pool for further deallocation.
+
+Nginx pool has the type ngx_pool_t. The following operations are supported:
+
+* ngx_create_pool(size, log) — create a pool with given block size. The pool object returned is allocat
+ed in the pool as well.
+* ngx_destroy_pool(pool) — free all pool memory, including the pool object itself.
+* ngx_palloc(pool, size) — allocate aligned memory from pool
+* ngx_pcalloc(pool, size) — allocated aligned memory from pool and fill it with zeroes
+* ngx_pnalloc(pool, size) — allocate unaligned memory from pool. Mostly used for allocating strings
+* ngx_pfree(pool, p) — free memory, previously allocated in the pool. Only allocations, forwarded to th
+e system allocator, can be freed.
+
+```
+u_char      *p;
+ngx_str_t   *s;
+ngx_pool_t  *pool;
+
+pool = ngx_create_pool(1024, log);
+if (pool == NULL) { /* error */ }
+
+s = ngx_palloc(pool, sizeof(ngx_str_t));
+if (s == NULL) { /* error */ }
+ngx_str_set(s, "foo");
+
+p = ngx_pnalloc(pool, 3);
+if (p == NULL) { /* error */ }
+ngx_memcpy(p, "foo", 3);
+```
+
+Since chain links ngx_chain_t are actively used in nginx, nginx pool provides a way to reuse them. The
+chain field of ngx_pool_t keeps a list of previously allocated links ready for reuse. For efficient all
+ocation of a chain link in a pool, the function ngx_alloc_chain_link(pool) should be used. This functio
+n looks up a free chain link in the pool list and only if it's empty allocates a new one. To free a lin
+k ngx_free_chain(pool, cl) should be called.
+
+Cleanup handlers can be registered in a pool. Cleanup handler is a callback with an argument which is c
+alled when pool is destroyed. Pool is usually tied with a specific nginx object (like HTTP request) and
+ destroyed in the end of that object’s lifetime, releasing the object itself. Registering a pool cleanu
+p is a convenient way to release resources, close file descriptors or make final adjustments to shared
+data, associated with the main object.
+
+A pool cleanup is registered by calling ngx_pool_cleanup_add(pool, size) which returns ngx_pool_cleanup
+_t pointer to be filled by the caller. The size argument allows allocating context for the cleanup hand
+ler.
+
+```
+ngx_pool_cleanup_t  *cln;
+
+cln = ngx_pool_cleanup_add(pool, 0);
+if (cln == NULL) { /* error */ }
+
+cln->handler = ngx_my_cleanup;
+cln->data = "foo";
+
+...
+
+static void
+ngx_my_cleanup(void *data)
+{
+    u_char  *msg = data;
+
+    ngx_do_smth(msg);
+}
+```
 
 Shared memory
 -------------
-TODO
+
+Shared memory is used by nginx to share common data between processes. Function ngx_shared_memory_add(c
+f, name, size, tag) adds a new shared memory entry ngx_shm_zone_t to the cycle. The function receives n
+ame and size of the zone. Each shared zone must have a unique name. If a shared zone entry with the pro
+vided name exists, the old zone entry is reused, if its tag value matches too. Mismatched tag is consid
+ered an error. Usually, the address of the module structure is passed as tag, making it possible to reu
+se shared zones by name within one nginx module.
+
+The shared memory entry structure ngx_shm_zone_t has the following fields:
+
+* init — initialization callback, called after shared zone is mapped to actual memory
+* data — data context, used to pass arbitrary data to the init callback
+* noreuse — flag, disabling shared zone reuse from the old cycle
+* tag — shared zone tag
+* shm — platform-specific object of type ngx_shm_t, having at least the following fields:
+    * addr — mapped shared memory address, initially NULL
+    * size — shared memory size
+    * name — shared memory name
+    * log — shared memory log
+    * exists — flag, showing that shared memory was inherited from the master process (Windows-specific
+)
+
+Shared zone entries are mapped to actual memory in ngx_init_cycle() after configuration is parsed. On P
+OSIX systems, mmap() syscall is used to create shared anonymous mapping. On Windows, CreateFileMapping(
+)/MapViewOfFileEx() pair is used.
+
+For allocating in shared memory, nginx provides slab pool ngx_slab_pool_t. In each nginx shared zone, a
+ slab pool is automatically created for allocating memory in that zone. The pool is located in the begi
+nning of the shared zone and can be accessed by the expression (ngx_slab_pool_t *) shm_zone->shm.addr.
+Allocation in shared zone is done by calling one of the functions ngx_slab_alloc(pool, size)/ngx_slab_c
+alloc(pool, size). Memory is freed by calling ngx_slab_free(pool, p).
+
+Slab pool divides all shared zone into pages. Each page is used for allocating objects of the same size
+. Only the sizes which are powers of 2, and not less than 8, are considered. Other sizes are rounded up
+ to one of these values. For each page, a bitmask is kept, showing which blocks within that page are in
+ use and which are free for allocation. For sizes greater than half-page (usually, 2048 bytes), allocat
+ion is done by entire pages.
+
+To protect data in shared memory from concurrent access, mutex is available in the mutex field of ngx_s
+lab_pool_t. The mutex is used by the slab pool while allocating and freeing memory. However, it can be
+used to protect any other user data structures, allocated in the shared zone. Locking is done by callin
+g ngx_shmtx_lock(&shpool->mutex), unlocking is done by calling ngx_shmtx_unlock(&shpool->mutex).
+
+```
+ngx_str_t        name;
+ngx_foo_ctx_t   *ctx;
+ngx_shm_zone_t  *shm_zone;
+
+ngx_str_set(&name, "foo");
+
+/* allocate shared zone context */
+ctx = ngx_pcalloc(cf->pool, sizeof(ngx_foo_ctx_t));
+if (ctx == NULL) {
+    /* error */
+}
+
+/* add an entry for 65k shared zone */
+shm_zone = ngx_shared_memory_add(cf, &name, 65536, &ngx_foo_module);
+if (shm_zone == NULL) {
+    /* error */
+}
+
+/* register init callback and context */
+shm_zone->init = ngx_foo_init_zone;
+shm_zone->data = ctx;
+
+
+...
+
+static ngx_int_t
+ngx_foo_init_zone(ngx_shm_zone_t *shm_zone, void *data)
+{
+    ngx_foo_ctx_t  *octx = data;
+
+    size_t            len;
+    ngx_foo_ctx_t    *ctx;
+    ngx_slab_pool_t  *shpool;
+
+    value = shm_zone->data;
+
+    if (octx) {
+        /* reusing a shared zone from old cycle */
+        ctx->value = octx->value;
+        return NGX_OK;
+    }
+
+    shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
+
+    if (shm_zone->shm.exists) {
+        /* initialize shared zone context in Windows nginx worker */
+        ctx->value = shpool->data;
+        return NGX_OK;
+    }
+
+    /* initialize shared zone */
+
+    ctx->value = ngx_slab_alloc(shpool, sizeof(ngx_uint_t));
+    if (ctx->value == NULL) {
+        return NGX_ERROR;
+    }
+
+    shpool->data = ctx->value;
+
+    return NGX_OK;
+}
+```
 
 日志
 =======
