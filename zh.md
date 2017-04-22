@@ -26,8 +26,8 @@ NGINX开发指南
 * [日志](#日志)
 * [周期](#周期)
 * [Buffer](#buffer)
-* [Networking](#networking)
-    * [Connection](#connection)
+* [网络](#网络)
+    * [连接](#连接)
 * [事件](#事件)
     * [事件](#事件)
     * [I/O事件](#I/O事件)
@@ -1099,32 +1099,32 @@ ngx_get_my_chain(ngx_pool_t *pool)
 }
 ```
 
-Networking
+网络
 ==========
 
-Connection
+连接
 ----------
 
-Connection type ngx_connection_t is a wrapper around a socket descriptor. Some of the structure fields are:
+连接结构体 ngx_connection_t 是socket描述符的封装。有如下字段：
 
-* fd — socket descriptor
-* data — arbitrary connection context. Normally, a pointer to a higher level object, built on top of the connection, like HTTP request or Stream session
-* read, write — read and write events for the connection
-* recv, send, recv_chain, send_chain — I/O operations for the connection
-* pool — connection pool
-* log — connection log
-* sockaddr, socklen, addr_text — remote socket address in binary and text forms
-* local_sockaddr, local_socklen — local socket address in binary form. Initially, these fields are empty. Function ngx_connection_local_sockaddr() should be used to get socket local address
-* proxy_protocol_addr, proxy_protocol_port - PROXY protocol client address and port, if PROXY protocol is enabled for the connection
-* ssl — nginx connection SSL context
-* reusable — flag, meaning, that the connection is at the state, when it can be reused
-* close — flag, meaning, that the connection is being reused and should be closed
+* fd — socket描述符
+* data — 任意连接上下文。通常指向更高层次的对象，构建在连接的上面，比如HTTP请求或Stream会话。
+* read, write — 连接的读写事件。
+* recv, send, recv_chain, send_chain — 连接的I/O操作。
+* pool — 连接池
+* log — connection日志
+* sockaddr, socklen, addr_text — 客户端的二进制和文格形式的地址。
+* local_sockaddr, local_socklen — 本地二进制形式地址。初始时这些为空，通过函数 ngx_connection_local_sockaddr() 得到本地socket地址。
+* proxy_protocol_addr, proxy_protocol_port - PROXY protocol 客户端地址和端口，如果为连接开启了 PROXY protocol。
+* ssl — nginx 连接 SSL 上下文
+* reusable — 可复用村记。
+* close — 关闭标记。表示连接是可复用的，并且应该被关闭。
 
-An nginx connection can transparently encapsulate SSL layer. In this case the connection ssl field holds a pointer to an ngx_ssl_connection_t structure, keeping all SSL-related data for the connection, including SSL_CTX and SSL. The handlers recv, send, recv_chain, send_chain are set as well to SSL functions.
+nginx connection可以透传SSL层。这种情况下connection ssl字段指向一个ngx_ssl_connection_t结构体，保留着这个连接的SSL相关的数据，包括 SSL_CTX 和 SSL。处理函数 recv, send, recv_chain, send_chain 被设置成对应的SSL函数。
 
-The number of connections per nginx worker is limited by the worker_connections value. All connection structures are pre-created when a worker starts and stored in the connections field of the cycle object. To reach out for a connection structure, ngx_get_connection(s, log) function is used. The function receives a socket descriptor s which needs to be wrapped in a connection structure.
+每个进程的connection数量被限制为 worker_connections 的值。所有的connection结构体会提前创建并且保存在cycle的connections这个字段里。通过 ngx_get_connection(s, log) 获得一个connection结构体。该函数接收socket描述符并且会在connection结构体里作封装。
 
-Since the number of connections per worker is limited, nginx provides a way to grab connections which are currently in use. To enable or disable reuse of a connection, function ngx_reusable_connection(c, reusable) is called. Calling ngx_reusable_connection(c, 1) sets the reuse flag of the connection structure and inserts the connection in the reusable_connections_queue of the cycle. Whenever ngx_get_connection() finds out there are no available connections in the free_connections list of the cycle, it calls ngx_drain_connections() to release a specific number of reusable connections. For each such connection, the close flag is set and its read handler is called which is supposed to free the connection by calling ngx_close_connection(c) and make it available for reuse. To exit the state when a connection can be reused ngx_reusable_connection(c, 0) is called. An example of reusable connections in nginx is HTTP client connections which are marked as reusable until some data is received from the client.
+国为每个进程有connection数的限制，nginx提供了一个抢占connection的方式。通过 ngx_reusable_connection(c, reusable) 允许或禁止connection的复用。调用 ngx_reusable_connection(c, 1) 设置reuse标记并且将connection加入 cycle 的 reusable_connections_queue。每当 ngx_get_connection() 发现 cycle 的 free_connections 无可用的 connection 时，它会调用 ngx_drain_connections() 以释放一定数量的可复用connection。对每个这样的 connection，关闭标记被设置并且读handler被调用以便通过调用ngx_close_connection(c)释放connection，然后将它设置为可复用。当一个connection可复用时可以调用ngx_reusable_connection(c, 0)退出这种状态。举个nginx里connection可复用的例子，在接收客户端的数据之前，HTTP客户端的connection会被标记为可复用。
 
 
 事件
