@@ -64,16 +64,16 @@ Code layout
 * auto — build scripts
 * src
     * core — basic types and functions — string, array, log, pool etc
-* event — event core
-    * modules — event notification modules: epoll, kqueue, select etc
-* http — core HTTP module and common code
-    * modules — other HTTP modules
-    * v2 — HTTPv2
-* mail — mail modules
-* os — platform-specific code
-    * unix
-    * win32
-* stream — stream modules
+    * event — event core
+        * modules — event notification modules: epoll, kqueue, select etc
+    * http — core HTTP module and common code
+        * modules — other HTTP modules
+        * v2 — HTTPv2
+    * mail — mail modules
+    * os — platform-specific code
+        * unix
+        * win32
+    * stream — stream modules
 
 Include files
 -------------

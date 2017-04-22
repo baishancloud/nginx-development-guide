@@ -70,16 +70,16 @@ NGINX开发指南
 * auto — 编译脚本
 * src
     * core — 基础数据结构和函数 — 字符串，数组，日志，内存池等
-* event — 事件机制核心模块
-    * modules — 具体事件机制模块：epoll，kqueue，select等
-* http — HTTP核心模块和公共代码
-    * modules — 其他HTTP模块
-    * v2 — HTTP/2模块
-* mail — 邮件协议模块
-* os — 平台相关代码
-    * unix
-    * win32
-* stream — 流模块
+    * event — 事件机制核心模块
+        * modules — 具体事件机制模块：epoll，kqueue，select等
+    * http — HTTP核心模块和公共代码
+        * modules — 其他HTTP模块
+        * v2 — HTTP/2模块
+    * mail — 邮件协议模块
+    * os — 平台相关代码
+        * unix
+        * win32
+    * stream — 流模块
 
 头文件
 -----
