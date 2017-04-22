@@ -1,8 +1,6 @@
-# nginx-development-guide
-
 # Multiple Language Versions
-* [English](en/)
-* [中文](zh/)
+* [中文](zh.md)
+* [English](en.md)
 
 ## Acknowledgments
 
