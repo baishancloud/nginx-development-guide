@@ -1013,35 +1013,217 @@ nginx提供以下的日志宏：
 Buffer
 ======
 
+For input/output operations, nginx provides the buffer type ngx_buf_t. Normally, it's used to hold data
+ to be written to a destination or read from a source. Buffer can reference data in memory and in file.
+ Technically it's possible that a buffer references both at the same time. Memory for the buffer is all
+ocated separately and is not related to the buffer structure ngx_buf_t.
+
+The structure ngx_buf_t has the following fields:
+
+* start, end — the boundaries of memory block, allocated for the buffer
+* pos, last — memory buffer boundaries, normally a subrange of start .. end
+* file_pos, file_last — file buffer boundaries, these are offsets from the beginning of the file
+* tag — unique value, used to distinguish buffers, created by different nginx module, usually, for the
+purpose of buffer reuse
+* file — file object
+* temporary — flag, meaning that the buffer references writable memory
+* memory — flag, meaning that the buffer references read-only memory
+* in_file — flag, meaning that current buffer references data in a file
+* flush — flag, meaning that all data prior to this buffer should be flushed
+* recycled — flag, meaning that the buffer can be reused and should be consumed as soon as possible
+* sync — flag, meaning that the buffer carries no data or special signal like flush or last_buf. Normal
+ly, such buffers are considered an error by nginx. This flags allows skipping the error checks
+* last_buf — flag, meaning that current buffer is the last in output
+* last_in_chain — flag, meaning that there's no more data buffers in a (sub)request
+* shadow — reference to another buffer, related to the current buffer. Usually current buffer uses data
+ from the shadow buffer. Once current buffer is consumed, the shadow buffer should normally also be mar
+ked as consumed
+* last_shadow — flag, meaning that current buffer is the last buffer, referencing a particular shadow b
+uffer
+* temp_file — flag, meaning that the buffer is in a temporary file
+
+For input and output buffers are linked in chains. Chain is a sequence of chain links ngx_chain_t, defi
+ned as follows:
+
+```
+typedef struct ngx_chain_s  ngx_chain_t;
+
+struct ngx_chain_s {
+    ngx_buf_t    *buf;
+    ngx_chain_t  *next;
+};
+```
+
+Each chain link keeps a reference to its buffer and a reference to the next chain link.
+
+Example of using buffers and chains:
+
+```
+ngx_chain_t *
+ngx_get_my_chain(ngx_pool_t *pool)
+{
+    ngx_buf_t    *b;
+    ngx_chain_t  *out, *cl, **ll;
+
+    /* first buf */
+    cl = ngx_alloc_chain_link(pool);
+    if (cl == NULL) { /* error */ }
+
+    b = ngx_calloc_buf(pool);
+    if (b == NULL) { /* error */ }
+
+    b->start = (u_char *) "foo";
+    b->pos = b->start;
+    b->end = b->start + 3;
+    b->last = b->end;
+    b->memory = 1; /* read-only memory */
+
+    cl->buf = b;
+    out = cl;
+    ll = &cl->next;
+
+    /* second buf */
+    cl = ngx_alloc_chain_link(pool);
+    if (cl == NULL) { /* error */ }
+
+    b = ngx_create_temp_buf(pool, 3);
+    if (b == NULL) { /* error */ }
+
+    b->last = ngx_cpymem(b->last, "foo", 3);
+
+    cl->buf = b;
+    cl->next = NULL;
+    *ll = cl;
+
+    return out;
+}
+```
+
 Networking
 ==========
 
 Connection
 ----------
-TODO
+
+Connection type ngx_connection_t is a wrapper around a socket descriptor. Some of the structure fields are:
+
+* fd — socket descriptor
+* data — arbitrary connection context. Normally, a pointer to a higher level object, built on top of the connection, like HTTP request or Stream session
+* read, write — read and write events for the connection
+* recv, send, recv_chain, send_chain — I/O operations for the connection
+* pool — connection pool
+* log — connection log
+* sockaddr, socklen, addr_text — remote socket address in binary and text forms
+* local_sockaddr, local_socklen — local socket address in binary form. Initially, these fields are empty. Function ngx_connection_local_sockaddr() should be used to get socket local address
+* proxy_protocol_addr, proxy_protocol_port - PROXY protocol client address and port, if PROXY protocol is enabled for the connection
+* ssl — nginx connection SSL context
+* reusable — flag, meaning, that the connection is at the state, when it can be reused
+* close — flag, meaning, that the connection is being reused and should be closed
+
+An nginx connection can transparently encapsulate SSL layer. In this case the connection ssl field holds a pointer to an ngx_ssl_connection_t structure, keeping all SSL-related data for the connection, including SSL_CTX and SSL. The handlers recv, send, recv_chain, send_chain are set as well to SSL functions.
+
+The number of connections per nginx worker is limited by the worker_connections value. All connection structures are pre-created when a worker starts and stored in the connections field of the cycle object. To reach out for a connection structure, ngx_get_connection(s, log) function is used. The function receives a socket descriptor s which needs to be wrapped in a connection structure.
+
+Since the number of connections per worker is limited, nginx provides a way to grab connections which are currently in use. To enable or disable reuse of a connection, function ngx_reusable_connection(c, reusable) is called. Calling ngx_reusable_connection(c, 1) sets the reuse flag of the connection structure and inserts the connection in the reusable_connections_queue of the cycle. Whenever ngx_get_connection() finds out there are no available connections in the free_connections list of the cycle, it calls ngx_drain_connections() to release a specific number of reusable connections. For each such connection, the close flag is set and its read handler is called which is supposed to free the connection by calling ngx_close_connection(c) and make it available for reuse. To exit the state when a connection can be reused ngx_reusable_connection(c, 0) is called. An example of reusable connections in nginx is HTTP client connections which are marked as reusable until some data is received from the client.
+
 
 Events
 ======
 
 Event
 -----
-TODO
+
+Event object ngx_event_t in nginx provides a way to be notified of a specific event happening.
+
+Some of the fields of the ngx_event_t are:
+
+* data — arbitrary event context, used in event handler, usually, a pointer to a connection, tied with the event
+* handler — callback function to be invoked when the event happens
+* write — flag, meaning that this is the write event. Used to distinguish between read and write events
+* active — flag, meaning that the event is registered for receiving I/O notifications, normally from notification mechanisms like epoll, kqueue, poll
+* ready — flag, meaning that the event has received an I/O notification
+* delayed — flag, meaning that I/O is delayed due to rate limiting
+* timer — Red-Black tree node for inserting the event into the timer tree
+* timer_set — flag, meaning that the event timer is set, but not yet expired
+* timedout — flag, meaning that the event timer has expired
+* eof — read event flag, meaning that the eof has happened while reading data
+* pending_eof — flag, meaning that the eof is pending on the socket, even though there may be some data available before it. The flag is delivered via EPOLLRDHUP epoll event or EV_EOF kqueue flag
+* error — flag, meaning that an error has happened while reading (for read event) or writing (for write event)
+* cancelable — timer event flag, meaning that the event handler should be called while performing nginx worker graceful shutdown, event though event timeout has not yet expired. The flag provides a way to finalize certain activities, for example, flush log files
+* posted — flag, meaning that the event is posted to queue
+* queue — queue node for posting the event to a queue
 
 I/O events
 ----------
-TODO
+
+Each connection, received with the ngx_get_connection() call, has two events attached to it: c->read and c->write. These events are used to receive notifications about the socket being ready for reading or writing. All such events operate in Edge-Triggered mode, meaning that they only trigger notifications when the state of the socket changes. For example, doing a partial read on a socket will not make nginx deliver a repeated read notification until more data arrive in the socket. Even when the underlying I/O notification mechanism is essentially Level-Triggered (poll, select etc), nginx will turn the notifications into Edge-Triggered. To make nginx event notifications consistent across all notifications systems on different platforms, it's required, that the functions ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) are called after handling an I/O socket notification or calling any I/O functions on that socket. Normally, these functions are called once in the end of each read or write event handler.
 
 Timer events
 ------------
-TODO
+
+An event can be set to notify a timeout expiration. The function ngx_add_timer(ev, timer) sets a timeout for an event, ngx_del_timer(ev) deletes a previously set timeout. Timeouts currently set for all existing events, are kept in a global timeout Red-Black tree ngx_event_timer_rbtree. The key in that tree has the type ngx_msec_t and is the time in milliseconds since the beginning of January 1, 1970 (modulus ngx_msec_t max value) at which the event should expire. The tree structure provides fast inserting and deleting operations, as well as accessing the nearest timeouts. The latter is used by nginx to find out for how long to wait for I/O events and for expiring timeout events afterwards.
 
 Posted events
 -------------
-TODO
+
+An event can be posted which means that its handler will be called at some point later within the current event loop iteration. Posting events is a good practice for simplifying code and escaping stack overflows. Posted events are held in a post queue. The macro ngx_post_event(ev, q) posts the event ev to the post queue q. Macro ngx_delete_posted_event(ev) deletes the event ev from whatever queue it's currently posted. Normally, events are posted to the ngx_posted_events queue. This queue is processed late in the event loop — after all I/O and timer events are already handled. The function ngx_event_process_posted() is called to process an event queue. This function calls event handlers until the queue is not empty. This means that a posted event handler can post more events to be processed within the current event loop iteration.
+
+Example:
+
+```
+void
+ngx_my_connection_read(ngx_connection_t *c)
+{
+    ngx_event_t  *rev;
+
+    rev = c->read;
+
+    ngx_add_timer(rev, 1000);
+
+    rev->handler = ngx_my_read_handler;
+
+    ngx_my_read(rev);
+}
+
+
+void
+ngx_my_read_handler(ngx_event_t *rev)
+{
+    ssize_t            n;
+    ngx_connection_t  *c;
+    u_char             buf[256];
+
+    if (rev->timedout) { /* timeout expired */ }
+
+    c = rev->data;
+
+    while (rev->ready) {
+        n = c->recv(c, buf, sizeof(buf));
+
+        if (n == NGX_AGAIN) {
+            break;
+        }
+
+        if (n == NGX_ERROR) { /* error */ }
+
+        /* process buf */
+    }
+
+    if (ngx_handle_read_event(rev, 0) != NGX_OK) { /* error */ }
+}
+```
 
 Event loop
 ----------
-TODO
+
+All nginx processes which do I/O, have an event loop. The only type of process which does not have I/O, is nginx master process which spends most of its time in sigsuspend() call waiting for signals to arrive. Event loop is implemented in ngx_process_events_and_timers() function. This function is called repeatedly until the process exits. It has the following stages:
+
+* find nearest timeout by calling ngx_event_find_timer(). This function finds the leftmost timer tree node and returns the number of milliseconds until that node expires
+* process I/O events by calling a handler, specific to event notification mechanism, chosen by nginx configuration. This handler waits for at least one I/O event to happen, but no longer, than the nearest timeout. For each read or write event which has happened, the ready flag is set and its handler is called. For Linux, normally, the ngx_epoll_process_events() handler is used which calls epoll_wait() to wait for I/O events
+* expire timers by calling ngx_event_expire_timers(). The timer tree is iterated from the leftmost element to the right until a not yet expired timeout is found. For each expired node the timedout event flag is set, timer_set flag is reset, and the event handler is called
+* process posted events by calling ngx_event_process_posted(). The function repeatedly removes the first element from the posted events queue and calls its handler until the queue gets empty
+
+All nginx processes handle signals as well. Signal handlers only set global variables which are checked after the ngx_process_events_and_timers() call.
 
 进程
 =========
