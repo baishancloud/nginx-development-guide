@@ -28,12 +28,12 @@ NGINX开发指南
 * [Buffer](#buffer)
 * [Networking](#networking)
     * [Connection](#connection)
-* [Events](#events)
-    * [Event](#event)
-    * [I/O events](#i/O-events)
-    * [Timer events](#timer-events)
-    * [Posted events](#posted-events)
-    * [Event loop](#event-loop)
+* [事件](#事件)
+    * [事件](#事件)
+    * [I/O事件](#I/O事件)
+    * [定时器事件](#定时器事件)
+    * [已加事件](#已加事件)
+    * [遍历事件](#遍历事件)
 * [进程](#进程)
 * [模块](#模块)
     * [添加新模块](#添加新模块)
@@ -1127,48 +1127,48 @@ The number of connections per nginx worker is limited by the worker_connections 
 Since the number of connections per worker is limited, nginx provides a way to grab connections which are currently in use. To enable or disable reuse of a connection, function ngx_reusable_connection(c, reusable) is called. Calling ngx_reusable_connection(c, 1) sets the reuse flag of the connection structure and inserts the connection in the reusable_connections_queue of the cycle. Whenever ngx_get_connection() finds out there are no available connections in the free_connections list of the cycle, it calls ngx_drain_connections() to release a specific number of reusable connections. For each such connection, the close flag is set and its read handler is called which is supposed to free the connection by calling ngx_close_connection(c) and make it available for reuse. To exit the state when a connection can be reused ngx_reusable_connection(c, 0) is called. An example of reusable connections in nginx is HTTP client connections which are marked as reusable until some data is received from the client.
 
 
-Events
+事件
 ======
 
-Event
------
+事件
+----
 
-Event object ngx_event_t in nginx provides a way to be notified of a specific event happening.
+事件对象 ngx_event_t 在nginx里提供了一种特定事件发生时能被通知的方式。
 
-Some of the fields of the ngx_event_t are:
+以下是 ngx_event_t 的一些字段：
 
-* data — arbitrary event context, used in event handler, usually, a pointer to a connection, tied with the event
-* handler — callback function to be invoked when the event happens
-* write — flag, meaning that this is the write event. Used to distinguish between read and write events
-* active — flag, meaning that the event is registered for receiving I/O notifications, normally from notification mechanisms like epoll, kqueue, poll
-* ready — flag, meaning that the event has received an I/O notification
-* delayed — flag, meaning that I/O is delayed due to rate limiting
-* timer — Red-Black tree node for inserting the event into the timer tree
-* timer_set — flag, meaning that the event timer is set, but not yet expired
-* timedout — flag, meaning that the event timer has expired
-* eof — read event flag, meaning that the eof has happened while reading data
-* pending_eof — flag, meaning that the eof is pending on the socket, even though there may be some data available before it. The flag is delivered via EPOLLRDHUP epoll event or EV_EOF kqueue flag
-* error — flag, meaning that an error has happened while reading (for read event) or writing (for write event)
-* cancelable — timer event flag, meaning that the event handler should be called while performing nginx worker graceful shutdown, event though event timeout has not yet expired. The flag provides a way to finalize certain activities, for example, flush log files
-* posted — flag, meaning that the event is posted to queue
-* queue — queue node for posting the event to a queue
+* data — 任意的事件上下文，用于事件处理。通常指向 connection，使其绑定到事件。
+* handler — 回调函数。当事件发生时调用。
+* write — 写标记。表示这是一个写事件。用于区分读写事件。
+* active — 活跃标记。表示该事件收到I/O通知后已经注册，一般来自像 epoll, kqueue, poll 这样的通知机制。
+* ready — 就绪标记。表示这个事件接收到I/O通知。
+* delayed — 延迟标记。意味着I/O由于限速而延迟。
+* timer — 红黑树节点。用于添加进超时红黑树。
+* timer_set — 定时器设置标记。意味着这个事件定时器被设置，但还未过期。
+* timedout — 超时标记。意味着这个事件已经过期。
+* eof — 读结束标记。表示读结束。
+* pending_eof — 结束挂起标记。表示结束是在socket上挂起的，虽然可能还有一些数据可用。这个标记通过 epoll EPOLLRDHUP 事件 or kqueue EV_EOF 标记传递。
+* error — 错误标记。意思当读或写时发生了错误。
+* cancelable — 可取消标记。表示当nginx工作进程退出时，即使该事件没过期也能被立即调用。它提供了一种方式用来完成特定动作，比如清空日志文件。
+* posted — 队列加入标记。意味这个事件已经加入了队列。
+* queue — 队列节点。用于加到队列。
 
-I/O events
+I/O事件
+-------
+
+每个通过调用ngx_get_connection()的 connection 有两个事件：c->read 和 c->write。这两事件用于接受可读写socket的通知。所有的这些事件都是边缘触发模式，意味着只有socket的状态变化时它们才会触发。举个例子，假设只读了部份数据，当有更多的数据到达时，nginx不会重新发读通知。即使底层的I/O通知机制本质上是水平触发的（poll, select等等），nginx将会把它们转成边缘触发。为了将不同平台的事件通知机制统一起来，当处理I/O socket通知或任何I/O操作后，必须调用ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) 这两函数。通常这两函数在读或写事件处理结束后调用一次。
+
+定时器事件
 ----------
 
-Each connection, received with the ngx_get_connection() call, has two events attached to it: c->read and c->write. These events are used to receive notifications about the socket being ready for reading or writing. All such events operate in Edge-Triggered mode, meaning that they only trigger notifications when the state of the socket changes. For example, doing a partial read on a socket will not make nginx deliver a repeated read notification until more data arrive in the socket. Even when the underlying I/O notification mechanism is essentially Level-Triggered (poll, select etc), nginx will turn the notifications into Edge-Triggered. To make nginx event notifications consistent across all notifications systems on different platforms, it's required, that the functions ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) are called after handling an I/O socket notification or calling any I/O functions on that socket. Normally, these functions are called once in the end of each read or write event handler.
+事件可以被设置以通知超时过期。ngx_add_timer(ev, timer) 函数设置事件的超时时间，ngx_del_timer(ev) 删除前面设置的超时。当前为所有事件设置的超时都存放在一个全局的超时红黑树 ngx_event_timer_rbtree。这个树key的类型是 ngx_msec_t，值是从1970年1月1日算起的过期时间。这个树结构提供了快速的插入和删除，以及访问那些最小的超时。后者被nginx用于查找等待I/O事件的时间以及之后的过期事件。
 
-Timer events
-------------
-
-An event can be set to notify a timeout expiration. The function ngx_add_timer(ev, timer) sets a timeout for an event, ngx_del_timer(ev) deletes a previously set timeout. Timeouts currently set for all existing events, are kept in a global timeout Red-Black tree ngx_event_timer_rbtree. The key in that tree has the type ngx_msec_t and is the time in milliseconds since the beginning of January 1, 1970 (modulus ngx_msec_t max value) at which the event should expire. The tree structure provides fast inserting and deleting operations, as well as accessing the nearest timeouts. The latter is used by nginx to find out for how long to wait for I/O events and for expiring timeout events afterwards.
-
-Posted events
+已加事件
 -------------
 
-An event can be posted which means that its handler will be called at some point later within the current event loop iteration. Posting events is a good practice for simplifying code and escaping stack overflows. Posted events are held in a post queue. The macro ngx_post_event(ev, q) posts the event ev to the post queue q. Macro ngx_delete_posted_event(ev) deletes the event ev from whatever queue it's currently posted. Normally, events are posted to the ngx_posted_events queue. This queue is processed late in the event loop — after all I/O and timer events are already handled. The function ngx_event_process_posted() is called to process an event queue. This function calls event handlers until the queue is not empty. This means that a posted event handler can post more events to be processed within the current event loop iteration.
+添加事件意味着它的handler会在某个时间点的事件遍历时调用。加入事件对简化代码和防止栈溢出是一个好的实践。加入的事件放在一个队列里。宏 ngx_post_event(ev, q) 加入事件到 post queue，ngx_delete_posted_event(ev) 从它所加入的队列中删除事件。通常事件加到 ngx_posted_events 这个队 列。 这个事件在稍后事件遍历中被事件(在所有的I/O和定时器事件已经处理后)。 ngx_event_process_posted() 函数用来处理事件队列。这个函数一直处理到列队为空，这意味着在当前的事件遍历过程中可以加更多的事件。
 
-Example:
+例子：
 
 ```
 void
@@ -1213,17 +1213,17 @@ ngx_my_read_handler(ngx_event_t *rev)
 }
 ```
 
-Event loop
+遍历事件
 ----------
 
-All nginx processes which do I/O, have an event loop. The only type of process which does not have I/O, is nginx master process which spends most of its time in sigsuspend() call waiting for signals to arrive. Event loop is implemented in ngx_process_events_and_timers() function. This function is called repeatedly until the process exits. It has the following stages:
+所有做I/O处理的nginx进程都有一个事件遍历。唯一没有I/O的进程是master进程，因为它花大部份时间在sigsuspend()上面，以等待信号的到达。事件遍历由 ngx_process_events_and_timers 函数实现。只要进程存在，这个函数就会一直重复的调用。它有以下几个阶段：
 
-* find nearest timeout by calling ngx_event_find_timer(). This function finds the leftmost timer tree node and returns the number of milliseconds until that node expires
-* process I/O events by calling a handler, specific to event notification mechanism, chosen by nginx configuration. This handler waits for at least one I/O event to happen, but no longer, than the nearest timeout. For each read or write event which has happened, the ready flag is set and its handler is called. For Linux, normally, the ngx_epoll_process_events() handler is used which calls epoll_wait() to wait for I/O events
-* expire timers by calling ngx_event_expire_timers(). The timer tree is iterated from the leftmost element to the right until a not yet expired timeout is found. For each expired node the timedout event flag is set, timer_set flag is reset, and the event handler is called
-* process posted events by calling ngx_event_process_posted(). The function repeatedly removes the first element from the posted events queue and calls its handler until the queue gets empty
+* 找出通过调用 ngx_event_find_timer() 的最小超时时间。该函数找到最左边的定时器树节点，并且返回该节点的到期毫秒数。
+* 处理I/O事件。通过nginx配置选出对应的事件通知机制，然后处理。这个handler会一直待待至有I/O事件发生，或者最小的超时时间。对每个发生的读写事件，它的ready标记会被设置，它的handler会被调用。对Linux而言，通常会使用 ngx_epoll_process_events() 来调用 epoll_wait() 以等待I/O发生。
+* 通过调用 ngx_event_expire_timers() 处理过期事件。这个定时器树会从最左侧的节点向右历遍，直到找到没有过期到期的超时。对每个超时的节点，timedout 标记会被设置，timer_set 会被重量置，并且事件handler会被调用。
+* 通过调用 ngx_event_process_posted() 处理已加事件。这个函数一直重复删除和处理队列里的第一个无素，直到队列为空。
 
-All nginx processes handle signals as well. Signal handlers only set global variables which are checked after the ngx_process_events_and_timers() call.
+所有这些nginx进程也处理信号。信号handler只是设置了在 ngx_process_events_and_timers() 调用之后的全局变量。
 
 进程
 =========
