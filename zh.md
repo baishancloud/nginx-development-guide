@@ -55,7 +55,7 @@ NGINX开发指南
     * [Body filters](#body-filters)
     * [Building filter modules](#building-filter-modules)
     * [Buffer reuse](#buffer-reuse)
-    * [负载均衡](#load-balancing)
+    * [负载均衡](#负载均衡)
     
 译者序
 =====
