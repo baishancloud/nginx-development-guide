@@ -680,12 +680,10 @@ if (data == NULL) {
 }
 ```
 
-Wildcard matching
------------------
+通配符匹配
+----------
 
-To create a hash that works with wildcards, ngx_hash_combined_t type is used. It includes the hash type
- described above and has two additional keys arrays: dns_wc_head and dns_wc_tail. The initialization of
- basic properties is done similarly to a usual hash:
+为了创建能运行通配符的hash，需要用 ngx_hash_combined_t 类型。它包含了上面提到的hash类型，还有两个额外的keys arrays：dns_wc_head 和 dns_wc_tail。它的基本的初始化类似于普通hash。
 
 ```
 ngx_hash_init_t      hash
@@ -695,7 +693,7 @@ hash.hash = &foo_hash.hash;
 hash.key = ...;
 ```
 
-It is possible to add wildcard keys using the NGX_HASH_WILDCARD_KEY flag:
+可以使用 NGX_HASH_WILDCARD_KEY 标记来添加通配符的key。
 
 ```
 /* k1 = ".example.org"; */
@@ -704,11 +702,9 @@ ngx_hash_add_key(&foo_keys, &k1, &data1, NGX_HASH_WILDCARD_KEY);
 ngx_hash_add_key(&foo_keys, &k2, &data2, NGX_HASH_WILDCARD_KEY);
 ```
 
-The function recognizes wildcards and adds keys into corresponding arrays. Please refer to the map modu
-le documentation for the description of the wildcard syntax and matching algorithm.
+这个函数重新组织通配符和添加keys到对应的数组。详细用法和匹配算法参考map模块。
 
-Depending on the contents of added keys, you may need to initialize up to three keys arrays: one for ex
-act matching (described above), and two for matching starting from head or tail of a string:
+根据添加keys的内容，你可能需要初始化三个keys arrays：一个用于前面提到的精确数组，另外两个用于从头或尾的模糊匹配：
 
 ```
 if (foo_keys.dns_wc_head.nelts) {
@@ -732,10 +728,9 @@ if (foo_keys.dns_wc_head.nelts) {
 }
 ```
 
-The keys array needs to be sorted, and initialization results must be added to the combined hash. The i
-nitialization of dns_wc_tail array is done similarly.
+keys 数组需要先排序，然后初始化后的结果必须添加到合并hash。dns_wc_tail 也是类似的操作。
 
-The lookup in a combined hash is handled by the ngx_hash_find_combined(chash, key, name, len):
+查找合并hash通过 ngx_hash_find_combined(chash, key, name, len)：
 
 ```
 /* key = "bar.example.org"; — will match ".example.org" */
@@ -745,43 +740,34 @@ hkey = ngx_hash_key(key.data, key.len);
 res = ngx_hash_find_combined(&foo_hash, hkey, key.data, key.len);
 ```
 
-Memory management
-=================
+内存管理
+========
 
-Heap
-----
+堆
+--
 
-To allocate memory from system heap, the following functions are provided by nginx:
+nginx提供以下的函数用于从系统堆分配内存：
 
-* ngx_alloc(size, log) — allocate memory from system heap. This is a wrapper around malloc() with loggi
-ng support. Allocation error and debugging information is logged to log
-ngx_calloc(size, log) — same as ngx_alloc(), but memory is filled with zeroes after allocation
-* ngx_memalign(alignment, size, log) — allocate aligned memory from system heap. This is a wrapper arou
-nd posix_memalign() on those platforms which provide it. Otherwise implementation falls back to ngx_all
-oc() which provides maximum alignment
-ngx_free(p) — free allocated memory. This is a wrapper around free()
+* ngx_alloc(size, log) — 从系统堆分配内存。这个封装了malloc()，并且带有log。分配错误和调试信息都会记录到log。
+* ngx_calloc(size, log) — 和 ngx_alloc() 一样，但是将分配后的内存填充为0。
+* ngx_memalign(alignment, size, log) — 从系统堆分配可对齐的内存。如果平台提供了posix_memalign()，就用它做为封装。否则返回调用传递最大对齐值参数的ngx_alloc()。
+* ngx_free(p) — 释放内存。这是free()的封装。
 
-Pool
-----
+内存池
+------
 
-Most nginx allocations are done in pools. Memory allocated in an nginx pool is freed automatically when
- the pool in destroyed. This provides good allocation performance and makes memory control easy.
+大部份nginx分配使用内存池完成。在内存池分配的内存会在内存池销毁时自动释放。这样就提供了更好的分配性能，并且控制内存变的更简单。
 
-A pool internally allocates objects in continuous blocks of memory. Once a block is full, a new one is
-allocated and added to the pool memory block list. When a large allocation is requested which does not
-fit into a block, such allocation is forwarded to the system allocator and the returned pointer is stor
-ed in the pool for further deallocation.
+内存池是通过在内部连续的内存块分配对象的。当一个块满时，新的块会被分配并且加入到该池的内存块列表。当块装不了一个大的分配时，分配会交给系统，然后返回指向存到该内存池，以后以后释放。
 
-Nginx pool has the type ngx_pool_t. The following operations are supported:
+nginx 内存池类型为 ngx_pool_t。支持以下操作：
 
-* ngx_create_pool(size, log) — create a pool with given block size. The pool object returned is allocat
-ed in the pool as well.
-* ngx_destroy_pool(pool) — free all pool memory, including the pool object itself.
-* ngx_palloc(pool, size) — allocate aligned memory from pool
-* ngx_pcalloc(pool, size) — allocated aligned memory from pool and fill it with zeroes
-* ngx_pnalloc(pool, size) — allocate unaligned memory from pool. Mostly used for allocating strings
-* ngx_pfree(pool, p) — free memory, previously allocated in the pool. Only allocations, forwarded to th
-e system allocator, can be freed.
+* ngx_create_pool(size, log) — 根据块大小创建内存池。返回pool对象也是在里面内存池里创建的。
+* ngx_destroy_pool(pool) — 销毁整个内存池，包括pool对象自己。
+* ngx_palloc(pool, size) — 从内存池分配对齐的内存。
+* ngx_pcalloc(pool, size) — 从内存池分配对齐的内存并且置为0。
+* ngx_pnalloc(pool, size) — 从内存池分配没对齐的内存。大部份用于分配字符串。
+* ngx_pfree(pool, p) — 释放前面内存池中分配的内存。只对那些由系统分配的内存才会释放。
 
 ```
 u_char      *p;
@@ -800,21 +786,11 @@ if (p == NULL) { /* error */ }
 ngx_memcpy(p, "foo", 3);
 ```
 
-Since chain links ngx_chain_t are actively used in nginx, nginx pool provides a way to reuse them. The
-chain field of ngx_pool_t keeps a list of previously allocated links ready for reuse. For efficient all
-ocation of a chain link in a pool, the function ngx_alloc_chain_link(pool) should be used. This functio
-n looks up a free chain link in the pool list and only if it's empty allocates a new one. To free a lin
-k ngx_free_chain(pool, cl) should be called.
+因为链 ngx_chain_t 在nginx经常使用，所以nginx内存池提供了一种方式来复用它们。ngx_pool_t 的 chain 字段保留了原先已经分配的列表用来复用。 为了有效分配内存池中的chain，应当使用 ngx_alloc_chain_link(pool) 函数。该函数查找内存池中空闲的chain，只有当为空时才分配一个新的。使用ngx_free_chain(pool, cl) 可以回收chain。 
 
-Cleanup handlers can be registered in a pool. Cleanup handler is a callback with an argument which is c
-alled when pool is destroyed. Pool is usually tied with a specific nginx object (like HTTP request) and
- destroyed in the end of that object’s lifetime, releasing the object itself. Registering a pool cleanu
-p is a convenient way to release resources, close file descriptors or make final adjustments to shared
-data, associated with the main object.
+cleanup handler可以注册在pool里。cleanup handler 是一个带有参数的回调，在内存池销毁时调用。内存池通常在特定的nginx对象（比如HTTP请求），并且在对象的生命周期结束时销毁，以释放对象自己。注册内存池cleanup可以方便地释放资源，关闭文件描述符，或者做最后的关联在对象上的数据的调整。
 
-A pool cleanup is registered by calling ngx_pool_cleanup_add(pool, size) which returns ngx_pool_cleanup
-_t pointer to be filled by the caller. The size argument allows allocating context for the cleanup hand
-ler.
+通过调用ngx_pool_cleanup_add(pool, size)注册pool cleanup，它将返回 ngx_pool_cleanup_t 类型的指针，调用者会设置它。size 参数用分配cleanup上下文的大小。
 
 ```
 ngx_pool_cleanup_t  *cln;
@@ -836,50 +812,31 @@ ngx_my_cleanup(void *data)
 }
 ```
 
-Shared memory
--------------
+共享内存
+--------
 
-Shared memory is used by nginx to share common data between processes. Function ngx_shared_memory_add(c
-f, name, size, tag) adds a new shared memory entry ngx_shm_zone_t to the cycle. The function receives n
-ame and size of the zone. Each shared zone must have a unique name. If a shared zone entry with the pro
-vided name exists, the old zone entry is reused, if its tag value matches too. Mismatched tag is consid
-ered an error. Usually, the address of the module structure is passed as tag, making it possible to reu
-se shared zones by name within one nginx module.
+nginx用共享内存在进程之间共享公共的数据。函数 ngx_shared_memory_add(cf, name, size, tag) 添加新的共享内存实体到cycle。该函数接收 name 和 zone的大小。每个共享内存必须有唯一的名称。如果提供的名称存在，并且tag值也匹配，则会复用旧的zone实体。tag不匹配会被认为错误。通常模块地址会被当作tag的值，这样在模块里就能通过name来复用共享内存。
 
-The shared memory entry structure ngx_shm_zone_t has the following fields:
+以下是 ngx_shm_zone_t 的字段：
 
-* init — initialization callback, called after shared zone is mapped to actual memory
-* data — data context, used to pass arbitrary data to the init callback
-* noreuse — flag, disabling shared zone reuse from the old cycle
-* tag — shared zone tag
-* shm — platform-specific object of type ngx_shm_t, having at least the following fields:
-    * addr — mapped shared memory address, initially NULL
-    * size — shared memory size
-    * name — shared memory name
-    * log — shared memory log
-    * exists — flag, showing that shared memory was inherited from the master process (Windows-specific
-)
+* init — 初始化回调函数，在实际的共享内存映射后调用。
+* data — data 上下文，传递给初始化回调函数。
+* noreuse — 村记。禁止复用从旧的cycle里的共享内存。
+* tag — 共享内存tag。
+* shm — 类型为 ngx_shm_t 的特定平台对象，有以下几个字段：
+    * addr — 映射的共享内存地址，初始为NULL
+    * size — 共享内存大小
+    * name — 共享内存名称
+    * log — 共享内存log
+    * exists — 标记。表示共享内存继承自主进程 (Windows特定)
 
-Shared zone entries are mapped to actual memory in ngx_init_cycle() after configuration is parsed. On P
-OSIX systems, mmap() syscall is used to create shared anonymous mapping. On Windows, CreateFileMapping(
-)/MapViewOfFileEx() pair is used.
+共享内存zone实体会在ngx_init_cycle()解析配置后在映射到实际的内存。对POSIX系统，mmap() 系统调用用来创建匿名共享映射。对Windows，使用CreateFileMapping()/MapViewOfFileEx()对。
 
-For allocating in shared memory, nginx provides slab pool ngx_slab_pool_t. In each nginx shared zone, a
- slab pool is automatically created for allocating memory in that zone. The pool is located in the begi
-nning of the shared zone and can be accessed by the expression (ngx_slab_pool_t *) shm_zone->shm.addr.
-Allocation in shared zone is done by calling one of the functions ngx_slab_alloc(pool, size)/ngx_slab_c
-alloc(pool, size). Memory is freed by calling ngx_slab_free(pool, p).
+nginx提供了 ngx_slab_pool_t 来分配共享内存。对每个zone，slab pool会自动创建用来分配内存。这个池在共享zone的开头，并且通过表达式 (ngx_slab_pool_t *) shm_zone->shm.addr 访问。共享内存的分配通过调用 ngx_slab_alloc(pool, size)/ngx_slab_c alloc(pool, size) 函数完成，内存通过调用 ngx_slab_free(pool, p) 释放。
 
-Slab pool divides all shared zone into pages. Each page is used for allocating objects of the same size
-. Only the sizes which are powers of 2, and not less than 8, are considered. Other sizes are rounded up
- to one of these values. For each page, a bitmask is kept, showing which blocks within that page are in
- use and which are free for allocation. For sizes greater than half-page (usually, 2048 bytes), allocat
-ion is done by entire pages.
+slab pool 将共享zone分成多个页。每个页被用于分配同样大小的对象。大小推荐为2的次方，并且不小于8。其它值被四舍五入。对每个页，bitmask被用来表示哪些块是已经使用的和哪些是空闲的。对大小超过半页（通常是2048字节），将按完整的页大小分配。
 
-To protect data in shared memory from concurrent access, mutex is available in the mutex field of ngx_s
-lab_pool_t. The mutex is used by the slab pool while allocating and freeing memory. However, it can be
-used to protect any other user data structures, allocated in the shared zone. Locking is done by callin
-g ngx_shmtx_lock(&shpool->mutex), unlocking is done by calling ngx_shmtx_unlock(&shpool->mutex).
+为了保护数据不会并发访问，需要有 ngx_slab_pool_t 的 mutex 字段。mutex 在分配和释放内存里被使用。然后它也可以用来保护其它分配自共享内存的数据。调用 ngx_shmtx_lock(&shpool->mutex) 锁住，调用 ngx_shmtx_unlock(&shpool->mutex) 解锁。
 
 ```
 ngx_str_t        name;

@@ -738,9 +738,9 @@ Heap
 To allocate memory from system heap, the following functions are provided by nginx:
 
 * ngx_alloc(size, log) — allocate memory from system heap. This is a wrapper around malloc() with logging support. Allocation error and debugging information is logged to log
-ngx_calloc(size, log) — same as ngx_alloc(), but memory is filled with zeroes after allocation
+* ngx_calloc(size, log) — same as ngx_alloc(), but memory is filled with zeroes after allocation
 * ngx_memalign(alignment, size, log) — allocate aligned memory from system heap. This is a wrapper around posix_memalign() on those platforms which provide it. Otherwise implementation falls back to ngx_alloc() which provides maximum alignment
-ngx_free(p) — free allocated memory. This is a wrapper around free()
+* ngx_free(p) — free allocated memory. This is a wrapper around free()
 
 Pool
 ----
