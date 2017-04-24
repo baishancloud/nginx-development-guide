@@ -39,9 +39,9 @@ NGINX开发指南
     * [添加新模块](#添加新模块)
     * [核心模块](#核心模块)
     * [配置指令](#配置指令)
-* [HTTP](#hTTP)
-    * [Connection](#connection)
-    * [Request](#request)
+* [HTTP](#HTTP)
+    * [连接](#连接)
+    * [请求](#请求)
     * [配置](#配置)
     * [Phases](#phases)
     * [Variables](#variables)
@@ -1496,93 +1496,70 @@ post函数参数是：ngx_conf_post_t它自己, data 来自主handler的参数�
 HTTP
 ====
 
-Connection
-----------
+连接
+----
 
-Each client HTTP connection runs through the following stages:
+每个HTTP客户端连接经历以下几个阶段：
 
-* ngx_event_accept() accepts a client TCP connection. This handler is called in response to a read noti
-fication on a listen socket. A new ngx_connecton_t object is created at this stage. The object wraps th
-e newly accepted client socket. Each nginx listener provides a handler to pass the new connection objec
-t to. For HTTP connections it's ngx_http_init_connection(c)
-* ngx_http_init_connection() performs early initialization of an HTTP connection. At this stage an ngx_
-http_connection_t object is created for the connection and its reference is stored in connection's data
- field. Later it will be substituted with an HTTP request object. PROXY protocol parser and SSL handsha
-ke are started at this stage as well
-* ngx_http_wait_request_handler() is a read event handler, that is called when data is available in the
- client socket. At this stage an HTTP request object ngx_http_request_t is created and set to connectio
-n's data field
-* ngx_http_process_request_line() is a read event handler, which reads client request line. The handler
- is set by ngx_http_wait_request_handler(). Reading is done into connection's buffer. The size of the b
-uffer is initially set by the directive client_header_buffer_size. The entire client header is supposed
- to fit the buffer. If the initial size is not enough, a bigger buffer is allocated, whose size is set
-by the large_client_header_buffers directive
-* ngx_http_process_request_headers() is a read event handler, which is set after ngx_http_process_reque
-st_line() to read client request header
-* ngx_http_core_run_phases() is called when the request header is completely read and parsed. This func
-tion runs request phases from NGX_HTTP_POST_READ_PHASE to NGX_HTTP_CONTENT_PHASE. The last phase is sup
-posed to generate response and pass it along the filter chain. The response in not necessarily sent to
-the client at this phase. It may remain buffered and will be sent at the finalization stage
-* ngx_http_finalize_request() is usually called when the request has generated all the output or produc
-ed an error. In the latter case an appropriate error page is looked up and used as the response. If the
- response is not completely sent to the client by this point, an HTTP writer ngx_http_writer() is activ
-ated to finish sending outstanding data
-* ngx_http_finalize_connection() is called when the response is completely sent to the client and the r
-equest can be destroyed. If client connection keepalive feature is enabled, ngx_http_set_keepalive() is
- called, which destroys current request and waits for the next request on the connection. Otherwise, ng
-x_http_close_request() destroys both the request and the connection
+* ngx_event_accept() 接受一个客户端TCP连接。这个函数在监听socket发生读通知时被调用。在这阶段创建新的 ngx_connecton_t 对象。这个对象封装了新接受的客户端socket。每个nginx监听会提供并传递给这个新的connection对象一个handler。比如 HTTP connection 是ngx_http_init_connection(c)。
+* ngx_http_init_connection() 执行了HTTP connection的早期初始化。这个阶段为connection创建了一个 ngx_http_connection_t 对象，并且引用存放在 connection 的 data 字段。稍后会被替换成 HTTP request 对象。PROXY 协议的解析和 SSL 握手也发生在这个阶段。
+* ngx_http_wait_request_handler() 是读事件handler，当客户端socket有数据可读时被调用。在这个阶段会创建 HTTP request 对象 ngx_http_request_t 并且设置到 connection 的 data 字段。
+* ngx_http_process_request_line() 是读事件handler，用来读请求行。这个 handler 在 ngx_http_wait_request_handler() 里设置。数据被读进 connection 的 buffer。 buffer的大小初始值是指令 client_header_buffer_size。整个 client header 应该是适合这个buffer的。如果这个初始值不够时，会分配一个更大的buffer，它的大小为指令large_client_header_buffers的值。
+* ngx_http_process_request_headers() 是读事件handler，在 ngx_http_process_request_line() 之后设置，被用来读请求头。
+* ngx_http_core_run_phases() 当整个http请求头读完和解析后调用。这个函数运行从 NGX_HTTP_POST_READ_PHASE 到 NGX_HTTP_CONTENT_PHASE 的请求阶段。最后阶段产生响应内容并传给整个filter链。响应不一定要在这阶段发给客户端。它可能缓冲起来然后在最后阶段发送。
+* ngx_http_finalize_request() 通常在请求已经产生了所有的输出或发生错误时调用。后者会查找合适的错误页面作为响应。如果响应没有完全的发送给客户端，HTTP写处理 ngx_http_writer() 会被激活以完成数据的发送。
+* ngx_http_finalize_connection() 在响应完全发送给客户端后调用，然后销毁请求。如果客户端连接的keepalive功能启用了，ngx_http_set_keepalive() 会被调用，用来销毁当前请求并等待这个连接的下一个请求。否则，调用 ngx_http_close_request() 同时销毁请求和连接。
 
-Request
--------
+请求
+----
 
-For each client HTTP request the ngx_http_request_t object is created. Some of the fields of this object:
+对每个客户端HTTP请求创建一个ngx_http_request_t对象。以下是这个对象的一些字段：
 
-* connection — pointer to a ngx_connection_t client connection object. Several requests may reference the same connection object at the same time - one main request and its subrequests. After a request is deleted, a new request may be created on the same connection.
+* connection — 指向类型为 ngx_connection_t 的 connection 对象。多个请求可能同时指向同个连接 - 一个主请求和它的多个子请求。一个请求被删除后，新的请求可能会在同样的连接上被创建。
 
-    Note that for HTTP connections ngx_connection_t's data field points back to the request. Such request is called active, as opposed to the other requests tied with the connection. Active request is used to handle client connection events and is allowed to output its response to the client. Normally, each request becomes active at some point to be able to send its output
+    注意：HTTP连接 ngx_connection_t 的 data 字段会指向这个请求。这种请求被认为是激活的，相反的其它该连接上的请求则不是。激活的请求被用来处理客户端事件，并且允许发送它的响应给客户端。通常每个请求会在某个时间点激活以发送它的数据。
 
-* ctx — array of HTTP module contexts. Each module of type NGX_HTTP_MODULE can store any value (normally, a pointer to a structure) in the request. The value is stored in the ctx array at the module's ctx_index position. The following macros provide a convenient way to get and set request contexts:
+* ctx — 一组HTTP模块的上下文。每个类型为 NGX_HTTP_MODULE 的模块在这个请求里可以存任意的东西（通常指向一个结构体）。值存放在模块ctx_index位置上对应ctx数组的地方。以下宏提供了获取和设置请求上下文的方便方式。
+    * ngx_http_get_module_ctx(r, module) — 返回模块的上下文。
+    * ngx_http_set_ctx(r, c, module) — 设置c为模块的上下文。
+* main_conf, srv_conf, loc_conf — 当前请求的配置数组。配置存放在模块的ctx_index对应的位置。
+* read_event_handler, write_event_handler - 请求的读写事件handler。通常，HTTP连接用 ngx_http_request_handler() 作为读写事件 handler。这个函数会调用当前激活请求的 read_event_handler 和 write_event_handler。
+* cache — 用于缓存上游响应的缓存对象。
+* upstream — 用于代理的上游对象。
+* pool — 请求内存池。这个内存池在请求被删除后被销毁。这个请求对象本身也是从该内存池分配的。对需要活动在整个客户端连接生命周期的分配，应该使用 ngx_connection_t 的 内存池。
+* header_in — 从请求头读的buffer。
+* headers_in, headers_out — 输入和输出的 HTTP 头部对象。两个对象都包含类型为 ngx_list_t 的 headers 头部域，用来保存原始的头部列表。此外还有比较特别的单独字段，用来直接获取和设置，比如 content_length_n, status 等等。
+* request_body — 客户端请求体对象。
+* start_sec, start_msec — 请求创建时间点。用于跟踪请求时间。
+* method, method_name — 客户端HTTP请求方法的数字和文本表示方式。方法的数字值定义在 src/http/ngx_http_request.h，有 NGX_HTTP_GET, NGX_HTTP_HEAD, NGX_HTTP_POST 等宏。
+* http_protocol, http_version, http_major, http_minor - 客户端HTTP协议和版本的文本形式 (“HTTP/1.0”, “HTTP/1.1” 等)，数字形式 (NGX_HTTP_VERSION_10, NGX_HTTP_VERSION_11 等) 和主次版本号
+* request_line, unparsed_uri — 客户端原始的请求行和URI。
+* uri, args, exten — 当前请求的请求URI, 参数和文件扩展名。URI值可能由于规范跟客户端发送过来的原始URI不同。经过请求处理，这些值可能在内部重定向时发生改变。
+* main — 指向主请求对象。创建这个创建用来处理HTTP请求，而那些子请求被创建用来执行主请求里的特定子任务。
+* parent — 子请求指向的父请求。
+* postponed — 依次要发送和创建的buffer和子请求列表。这个列表被用在 postpone filter 以提供连续的请求输出，它的各部份由子请求创建。
+* post_subrequest — 不用于主请求。指向子请求完成会调用的具有上下文的handler。不用于主请求。
+* posted_requests — 开始要执行或恢复的请求列表。通过调用请求的write_event_handler完成启动或恢复。通常这个handler会保留请求主函数，第一个运行请求阶段并且产生输出的。
 
-    * ngx_http_get_module_ctx(r, module) — returns module's context
-    * ngx_http_set_ctx(r, c, module) — sets c as module's context
-* main_conf, srv_conf, loc_conf — arrays of current request configurations. Configurations are stored at module's ctx_index positions
-* read_event_handler, write_event_handler - read and write event handlers for the request. Normally, an HTTP connection has ngx_http_request_handler() set as both read and write event handlers. This function calls read_event_handler and write_event_handler handlers of the currently active request
-* cache — request cache object for caching upstream response
-* upstream — request upstream object for proxying
-* pool — request pool. This pool is destroyed when the request is deleted. The request object itself is allocated in this pool. For allocations which should be available throughout the client connection's lifetime, ngx_connection_t's pool should be used instead
-* header_in — buffer where client HTTP request header in read
-* headers_in, headers_out — input and output HTTP headers objects. Both objects contain the headers field of type ngx_list_t keeping the raw list of headers. In addition to that, specific headers are available for getting and setting as separate fields, for example content_length_n, status etc
-* request_body — client request body object
-* start_sec, start_msec — time point when the request was created. Used for tracking request duration
-* method, method_name — numeric and textual representation of client HTTP request method. Numeric values for methods are defined in src/http/ngx_http_request.h with macros NGX_HTTP_GET, NGX_HTTP_HEAD, NGX_HTTP_POST etc
-* http_protocol, http_version, http_major, http_minor - client HTTP protocol version in its original textual form (“HTTP/1.0”, “HTTP/1.1” etc), numeric form (NGX_HTTP_VERSION_10, NGX_HTTP_VERSION_11 etc) and separate major and minor versions
-* request_line, unparsed_uri — client original request line and URI
-* uri, args, exten — current request URI, arguments and file extention. The URI value here might differ from the original URI sent by the client due to normalization. Throughout request processing, these value can change while performing internal redirects
-* main — pointer to a main request object. This object is created to process client HTTP request, as opposed to subrequests, created to perform a specific sub-task within the main request
-* parent — pointer to a parent request of a subrequest
-* postponed — list of output buffers and subrequests in the order they are sent and created. The list is used by the postpone filter to provide consistent request output, when parts of it are created by subrequests
-* post_subrequest — pointer to a handler with context to be called when a subrequest gets finalized. Unused for main requests
-* posted_requests — list of requests to be started or resumed. Starting or resuming is done by calling the request's write_event_handler. Normally, this handler holds the request main function, which at first runs request phases and then produces the output.
+    一个请求经常通过调用 ngx_http_post_request(r, NULL)加到posted_requests。这样会加到主请求的 posted_requests 列表里。函数会 ngx_http_run_posted_requests(c) 会运行所有的请求，这些添加在通过连接激活请求对应的主请求。这个函数应该在所有的事件处理中调用，这样能产生新的添加请求。通常在执行了请求的读写处理后调用。
 
-    A request is usually posted by the ngx_http_post_request(r, NULL) call. It is always posted to the main request posted_requests list. The function ngx_http_run_posted_requests(c) runs all requests, posted in the main request of the passed connection's active request. This function should be called in all event handlers, which can lead to new posted requests. Normally, it's called always after invoking a request's read or write handler
+* phase_handler — 当前请求阶段的索引。
+* ncaptures, captures, captures_data — 请求最后一次正则匹配产生的正则capture。当处理一个请求时，有很多地方可以发生正则匹配：map 查找， server 通过 SNI 或 HTTP Host 查找，rewrite, proxy_redirect 等等。capture 在查找时产生并且保存这些字段里。字段 ncaptures 保存caputure的个数, captures 保存 capture 边界，captures_data 保存字符串，针对这些匹配到的正则和被用于精确的capture。每次正则匹配后，请求capture会重置并且保存新的值。
+* count — 请求引用计数。这个字段只发生在主请求上。通过简单的 r->main->count++ 就可以递增。要通过 ngx_http_finalize_request(r, rc) 递减。创建子请求和运行读请求体处理都会增加这个计数。
+* subrequests — 当前子请求的嵌套级别。每个子请求会让它的父请求的嵌套级别数减1。一旦这个值到达0就会发生错误，主请求的这个值定义为 NGX_HTTP_MAX_SUBREQUESTS 这个常量。
+* uri_changes — 请求的URI剩余可改变数。一个请求可以改变它的URI的总次数限制为 NGX_HTTP_MAX_URI_CHANGES 这个常量。每次变化都会递减直到0。后者会导致错误发生。这些被认为是改变URI的操作是重写和内部重定向到普通或有命名的location。
+* blocked — 请求上的阻塞次数。只要此值为非0,请求不会被终止。目前这个值会由于待处理AIO（POSIX AIO和线程操作）操作和缓存锁增加。
+* buffered — 位，表示一些模块缓冲了请求产生的输出。一些filter都可以缓冲输出，比如 sub_filter 可以缓冲数据用来作部分字符串匹配，copy filter 因为缺少空闲的output_buffers缓冲数据，等等。只要这个值为非0，请求就不会终止，期望继续刷新。
+* header_only — 标记。用于表示不需要输出请求体。举例，这个标记用于 HTTP HEAD 请求。
+* keepalive — 标记。用于表示否支持客户端的持久连接。这个值根据 HTTP 版本和 头部 "Connection" 的值推算出。
 
-* phase_handler — index of current request phase
-* ncaptures, captures, captures_data — regex captures produced by the last regex match of the request. While processing a request, there's a number of places where a regex match can happen: map lookup, server lookup by SNI or HTTP Host, rewrite, proxy_redirect etc. Captures produced by a lookup are stored in the above mentioned fields. The field ncaptures holds the number of captures, captures holds captures boundaries, captures_data holds a string, against which the regex was matched and which should be used to extract captures. After each new regex match request captures are reset to hold new values
-* count — request reference counter. The field only makes sense for the main request. Increasing the counter is done by simple r->main->count++. To decrease the counter ngx_http_finalize_request(r, rc) should be called. Creation of a subrequest or running request body read process increase the counter
-* subrequests — current subrequest nesting level. Each subrequest gets the nesting level of its parent decreased by one. Once the value reaches zero an error is generated. The value for the main request is defined by the NGX_HTTP_MAX_SUBREQUESTS constant
-* uri_changes — number of URI changes left for the request. The total number of times a request can change its URI is limited by the NGX_HTTP_MAX_URI_CHANGES constant. With each change the value is decreased until it reaches zero. In the latter case an error is generated. The actions considered as URI changes are rewrites and internal redirects to normal or named locations
-* blocked — counter of blocks held on the request. While this value is non-zero, request cannot be terminated. Currently, this value is increased by pending AIO operations (POSIX AIO and thread operations) and active cache lock
-* buffered — bitmask showing which modules have buffered the output produced by the request. A number of filters can buffer output, for example sub_filter can buffer data due to a partial string match, copy filter can buffer data because of the lack of free output_buffers etc. As long as this value is non-zero, request is not finalized, expecting the flush
-* header_only — flag showing that output does not require body. For example, this flag is used by HTTP HEAD requests
-* keepalive — flag showing if client connection keepalive is supported. The value is inferred from HTTP version and “Connection” header value
-
-* header_sent — flag showing that output header has already been sent by the request
-* internal — flag showing that current request is internal. To enter the internal state, a request should pass through an internal redirect or be a subrequest. Internal requests are allowed to enter internal locations
-* allow_ranges — flag showing that partial response can be sent to client, if requested by the HTTP Range header
-* subrequest_ranges — flag showing that a partial response is allowed to be sent while processing a subrequest
-* single_range — flag showing that only a single continuous range of output data can be sent to the client. This flag is usually set when sending a stream of data, for example from a proxied server, and the entire response is not available at once
-* main_filter_need_in_memory, filter_need_in_memory — flags showing that the output should be produced in memory buffers but not in files. This is a signal to the copy filter to read data from file buffers even if sendfile is enabled. The difference between these two flags is the location of filter modules which set them. Filters called before the postpone filter in filter chain, set filter_need_in_memory requesting that only the current request output should come in memory buffers. Filters called later in filter chain set main_filter_need_in_memory requiring that both the main request and all the subrequest read files in memory while sending output
-* filter_need_temporary — flag showing that the request output should be produced in temporary buffers, but not in readonly memory buffers or file buffers. This is used by filters which may change output directly in the buffers, where it's sent
+* header_sent — 标记。表示请求的头部信息已经发送（不一定发到客户端）。
+* internal — 标记。表示当前请求是内部的。要进入这种内部的状态，请求必须通过内部重定向或者是一个子请求。内部请求进入内部的location。
+* allow_ranges — 标记。用于表示如果是HTTP Range的请求，可以发送部份响应给客户端。
+* subrequest_ranges — 标记。用于表示处理子请求时，允许发送部分响应给客户端。
+* single_range — 标记。表示只有一个连续的range能被发送给客户端。这个标记通常在发送数据流时设置，比如来自代理服务器，并且整个响应不是一次完成的。
+* main_filter_need_in_memory, filter_need_in_memory — 标记。用于表示输出应该产生自内存，而非文件。这个被copy filter用来从文件buffer读数据，即使开了sendfile。两者的匹别在设置它们的filter模块的location。这些在postpone filter调用之前的filters，设置了filter_need_in_memory 表明当前请求的输出应该来自memory buffer。在之后调用的filter设置 main_filter_need_in_memory 表明主请求和子请求在发送输出时都要从读文件到内存里。
+* filter_need_temporary — 表示请求输出应该产生自 temporary buffer，而且不能是只读的memory buffer或file buffer。这个用于那些可能直接改变要发送buffer输出的filter。
 
 配置
 -------------

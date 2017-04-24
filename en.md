@@ -38,7 +38,7 @@ Development guide
     * [Adding new modules](#adding-new-modules)
     * [Core modules](#core-modules)
     * [Configuration directives](#configuration-directives)
-* [HTTP](#hTTP)
+* [HTTP](#HTTP)
     * [Connection](#connection)
     * [Request](#request)
     * [Configuration](#configuration)
@@ -1522,7 +1522,7 @@ Each client HTTP connection runs through the following stages:
 * ngx_http_wait_request_handler() is a read event handler, that is called when data is available in the client socket. At this stage an HTTP request object ngx_http_request_t is created and set to connection's data field
 * ngx_http_process_request_line() is a read event handler, which reads client request line. The handler is set by ngx_http_wait_request_handler(). Reading is done into connection's buffer. The size of the buffer is initially set by the directive client_header_buffer_size. The entire client header is supposed to fit the buffer. If the initial size is not enough, a bigger buffer is allocated, whose size is set by the large_client_header_buffers directive
 * ngx_http_process_request_headers() is a read event handler, which is set after ngx_http_process_request_line() to read client request header
-* ngx_http_core_run_phases() is called when the request header is completely read and parsed. This function runs request phases from NGX_HTTP_POST_READ_PHASE to NGX_HTTP_CONTENT_PHASE. The last phase is supposed to generate response and pass it along the filter chain. The response in not necessarily sent to the client at this phase. It may remain buffered and will be sent at the finalization stage
+* ngx_http_core_run_phases() is called when the request header is completely read and parsed. This function runs request phases from NGX_HTTP_POST_READ_PHASE to NGX_HTTP_CONTENT_PHASE. The last phase is supposed to generate response and pass it along the filter chain. The response is not necessarily sent to the client at this phase. It may remain buffered and will be sent at the finalization stage
 * ngx_http_finalize_request() is usually called when the request has generated all the output or produced an error. In the latter case an appropriate error page is looked up and used as the response. If the response is not completely sent to the client by this point, an HTTP writer ngx_http_writer() is activated to finish sending outstanding data
 * ngx_http_finalize_connection() is called when the response is completely sent to the client and the request can be destroyed. If client connection keepalive feature is enabled, ngx_http_set_keepalive() is called, which destroys current request and waits for the next request on the connection. Otherwise, ngx_http_close_request() destroys both the request and the connection
 
