@@ -1944,9 +1944,9 @@ ngx_http_variable_request_set_size(ngx_http_request_t *r,
 复杂值
 -------
 
-A complex value, despite its name, provides an easy way to evaluate expressions that may contain text, variables, and their combination.
+复杂值提供了一种简单的方法来计算一个包含有文本、变量以及文本变量组合等情况的表达式的值。
 
-The complex value description in ngx_http_compile_complex_value is compiled at the configuration stage into ngx_http_complex_value_t which is used at runtime to obtain evaluated expression results.
+由ngx_http_compile_complex_value所表示的复杂值在配置阶段被编译到ngx_http_complex_value_t类型中，该编译的结果在运行阶段可以被用来计算表达式的值。
 
 ```
 ngx_str_t                         *value;
@@ -1968,22 +1968,22 @@ if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
 }
 ```
 
-Here, ccv holds all parameters that are required to initialize the complex value cv:
+这里，ccv里包含了全部初始化复杂值cv所需的参数：
 
-* cf — configuration pointer
-* value — string for parsing (input)
-* complex_value — compiled value (output)
-* zero — flag that enables zero-terminating value
-* conf_prefix — prefixes result with configuration prefix (the directory where nginx is currently looking for configuration)
-* root_prefix — prefixes result with root prefix (this is the normal nginx installation prefix)
+* cf — 配置指针
+* value — 待解析的字符串 (输入)
+* complex_value — 编译后的值 (输出)
+* zero — 是否对结果进行0结尾处理
+* conf_prefix — 是否将结果带上配置前缀（nginx当前查找配置的目录）
+* root_prefix — 是否将结果带上根前缀（通常是nginx的安装目录）
 
-The zero flag is usable when results are to be passed to libraries that require zero-terminated strings, and prefixes are handy when dealing with filenames.
+zero标记位在需要把结果传递给要求0结尾字符串的库时，非常有用，而前缀相关的标记位在处理文件名时很方便。
 
-Upon successful compilation, cv.lengths may be inspected to get information about the presence of variables in the expression. The NULL value means that the expression contained static text only, and there is no need in storing it as a complex value, so a simple string can be used.
+对于正确的编译，可以从cv.lengths成员获取到表达式中是否存在变量的情况。如果为NULL，则表示表达式中只是纯文本，所以没有必要将其保存成一个复杂值，使用简单的字符串就可以了。
 
-The ngx_http_set_complex_value_slot() is a convenient function used to initialize complex value completely right in the directive declaration.
+ngx_http_set_complex_value_slot()可以在声明指令的时候对复杂值进行初始化。
 
-At runtime, a complex value may be calculated using the ngx_http_complex_value() function:
+在运行阶段，复杂值可以使用ngx_http_complex_value()函数来计算：
 
 ```
 ngx_str_t  res;
@@ -1993,7 +1993,7 @@ if (ngx_http_complex_value(r, &cv, &res) != NGX_OK) {
 }
 ```
 
-Given the request r and previously compiled value cv the function will evaluate expression and put result into res.
+给定请求r和之前编译的cv，该函数会对表达式的值进行急计算并将结果存放在res变量中。
 
 请求重定向
 ---------
