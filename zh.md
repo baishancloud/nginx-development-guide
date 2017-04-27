@@ -2057,8 +2057,6 @@ ngx_http_foo_named_redirect(ngx_http_request_t *r)
 * 如果活动请求的子请求队列上的下一个请求之前的数据都已经发送完，则ngx_http_postpone_filter会将此请求激活
 * 当一个请求结束了，它的父请求变为活动请求
 
-A subrequest is created by calling the function ngx_http_subrequest(r, uri, args, psr, ps, flags), where r is the parent request, uri and args are URI and arguments of the subrequest, psr is the output parameter, receiving the newly created subrequest reference, ps is a callback object for notifying the parent request that the subrequest is being finalized, flags is subrequest creation flags bitmask. The following flags are available:
-
 一个子请求是用过调用ngx_http_subrequest(r, uri, args, psr, ps, flags)函数来创建的，其中r是父请求，uri和args分别是子请求的URI和请求参数，psr是一个输出参数，含有新创建的子请求的引用，ps是一个回调函数，用来在子请求结束的时候通知父请求，flags是子请求的创建标记位。有如下标记位可以使用：
 
 * NGX_HTTP_SUBREQUEST_IN_MEMORY - 子请求的输出不需要发送给客户端，而是在内存中保留。此标记位只对代理子请求有效。在子请求结束后，它的输出会以ngx_buf_t类型存放在r->upstream->buffer中。
@@ -2192,20 +2190,20 @@ ngx_http_foo_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 ngx_http_finalize_request(r, rc)函数接受如下的rc参数值：
 
 * NGX_DONE - 快速结束。减少请求引用计数并且如果为0的话就销毁请求。和客户端的连接可能会被继续复用。
-* NGX_ERROR, NGX_HTTP_REQUEST_TIME_OUT (408), NGX_HTTP_CLIENT_CLOSED_REQUEST (499) - error finalization. Terminate the request as soon as possible and close the client connection.
-* NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), codes greater than or equal to NGX_HTTP_SPECIAL_RESPONSE (300) - special response finalization. For these values nginx either sends a default code response page to the client or performs the internal redirect to an error_page location if it's configured for the code
-* Other codes are considered success finalization codes and may activate the request writer to finish sending the response body. Once body is completely sent, request count is decremented. If it reaches zero, the request is destroyed, but the client connection may still be used for other requests. If count is positive, there are unfinished activities within the request, which will be finalized at a later point.
+* NGX_ERROR, NGX_HTTP_REQUEST_TIME_OUT (408), NGX_HTTP_CLIENT_CLOSED_REQUEST (499) - 错误结束。尽可能快结束请求并关闭客户端连接。
+* NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), 大于或等于 NGX_HTTP_SPECIAL_RESPONSE (300) - 特殊响应结束。对这些值nginx要么发送默认代号响应页面给客户端，要么根据error_page location执行内部重定向（如果配置了的话）。
+* 其它值被认为是成功结束，并且可能激活请求writer完成发送响应体。一旦body发送完毕，请求计数就会递减。如果到达0,则该请求会被销毁，但是客户端可能因为其它请求继续被使用着。如果计数大于0, 则该请求内还有未完成的活动，它们将在后面被继续完成。
 
 请求体
 ------
 
-For dealing with client request body, nginx provides the following functions: ngx_http_read_client_request_body(r, post_handler) and ngx_http_discard_request_body(r). The first function reads the request body and makes it available via the request_body request field. The second function instructs nginx to discard (read and ignore) the request body. One of these functions must be called for every request. Normally, it is done in the content handler.
+为处理客户端请求体，nginx提供了两个函数：ngx_http_read_client_request_body(r, post_handler) 和 ngx_http_discard_request_body(r)。每一个函数读请求体并且设到 request_body 字段。第二个函数指示nginx丢弃（读和忽略）请求体。每个请求必须调用它们其中的一个。通常，这个在content阶段完成。
 
-Reading or discarding client request body from a subrequest is not allowed. It should always be done in the main request. When a subrequest is created, it inherits the parent request_body object which can be used by the subrequest if the main request has previously read the request body.
+读或丢弃客户端请求体不能在子请求里。这个需要在主请求里完成。当一个子请求创建时，如果父请求已经在前面读了请求体，则子请求会继承父的request_body以便使用。
 
-The function ngx_http_read_client_request_body(r, post_handler) starts the process of reading the request body. When the body is completely read, the post_handler callback is called to continue processing the request. If request body is missing or already read, the callback is called immediately. The function ngx_http_read_client_request_body(r, post_handler) allocates the request_body request field of type ngx_http_request_body_t. The field bufs of this object keeps the result as a buffer chain. The body can be saved in memory buffers or file buffers, if client_body_buffer_size is not enough to fit the entire body in memory.
+函数 ngx_http_read_client_request_body(r, post_handler) 开始读请求体的处理。当请求体完全读取后，post_handler 回调函数会被调用以继续处理请求。如果没有请求体或已读，则回调函数会立即被调用。函数 ngx_http_read_client_request_body(r, post_handler) 分配类型为ngx_http_request_body_t的request_body字段。该对象的bufs字段将结果保留为buffer chain。请求体可以保存在内存buffer，如果client_body_buffer_size不足于容纳整个在内存的body时，则保存在文件buffer。
 
-The following example reads client request body and returns its size.
+以下例子读客户端请求体并返回它的大小。
 
 ```
 ngx_int_t
@@ -2272,17 +2270,17 @@ ngx_http_foo_init(ngx_http_request_t *r)
 }
 ```
 
-The following fields of the request affect the way request body is read:
+以下请求的字段会影响请求体的读取方式。
 
-* request_body_in_single_buf - read body to a single memory buffer
-* request_body_in_file_only - always read body to a file, even if fits the memory buffer
-* request_body_in_persistent_file - do not unlink the file right after creation. Such a file can be moved to another directory
-* request_body_in_clean_file - unlink the file the when the request is finalized. This can be useful when a file was supposed to be moved to another directory but eventually was not moved for some reason
-* request_body_file_group_access - enable file group access. By default a file is created with 0600 access mask. When the flag is set, 0660 access mask is used
-* request_body_file_log_level - log file errors with this log level
-* request_body_no_buffering - read request body without buffering
+* request_body_in_single_buf - 将请求体读到单一内存buffer。
+* request_body_in_file_only - 始终将请求体读到文件，即使适合内存缓冲区。
+* request_body_in_persistent_file - 创建后不删除该文件。这样的文件可以被移到其它目录。
+* request_body_in_clean_file - 当请求结束时删除该文件。当文件希望被移到其它目录，但由于某种原因没移走，这时该字段就派上用场了。
+* request_body_file_group_access - 启用文件组权限。默认情况文件以0600权限被创建。当该标记设置时，0660权限就被用上了。
+* request_body_file_log_level - 记录文件错误的日志级别。
+* request_body_no_buffering - 不缓冲的读请求体。
 
-When the request_body_no_buffering flag is set, the unbuffered mode of reading the request body is enabled. In this mode, after calling ngx_http_read_client_request_body(), the bufs chain may keep only a part of the body. To read the next part, the ngx_http_read_unbuffered_request_body(r) function should be called. The return value of NGX_AGAIN and the request flag reading_body indicate that more data is available. If bufs is NULL after calling this function, there is nothing to read at the moment. The request callback read_event_handler will be called when the next part of request body is available.
+当设置request_body_no_buffering这个标记，读请求体的非缓冲模式就开启了。这种模式下，调用完 ngx_http_read_client_request_body()之后，bufs链可能只保留请求体的一部份。要继续读下个部分，应该调用ngx_http_read_unbuffered_request_body(r) 函数。返回值为 NGX_AGAIN 并且设置了标记reading_body表明还有更多的数据可读。如果调用该函数后 bufs 是 NULL，则说明此该没有数据可读。当请求体下个部份可用时，请求回调用函数 read_event_handler 回被调用。
 
 响应
 ----
