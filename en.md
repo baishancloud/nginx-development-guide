@@ -2437,7 +2437,7 @@ Response body
 
 Response body is sent by calling the function ngx_http_output_filter(r, cl). The function can be called multiple times. Each time it sends a part of the response body passed as a buffer chain. The last body buffer should have the last_buf flag set.
 
-The following example produces a complete HTTP output with "foo" as its body. In order for the example to work not only as a main request but as a subrequest as well, the last_in_chain_flag is set in the last buffer of the output. The last_buf flag is set only for the main request since a subrequest's last buffers does not end the entire output.
+The following example produces a complete HTTP output with "foo" as its body. In order for the example to work not only as a main request but as a subrequest as well, the last_in_chain flag is set in the last buffer of the output. The last_buf flag is set only for the main request since a subrequest's last buffers does not end the entire output.
 
 ```
 static ngx_int_t
