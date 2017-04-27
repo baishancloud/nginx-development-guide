@@ -2280,15 +2280,15 @@ The following fields of the request affect the way request body is read:
 
 When the request_body_no_buffering flag is set, the unbuffered mode of reading the request body is enabled. In this mode, after calling ngx_http_read_client_request_body(), the bufs chain may keep only a part of the body. To read the next part, the ngx_http_read_unbuffered_request_body(r) function should be called. The return value of NGX_AGAIN and the request flag reading_body indicate that more data is available. If bufs is NULL after calling this function, there is nothing to read at the moment. The request callback read_event_handler will be called when the next part of request body is available.
 
-Response
---------
+响应
+----
 
-An HTTP response in nginx is produced by sending the response header followed by the optional response body. Both header and body are passed through a chain of filters and eventually get written to the client socket. An nginx module can install its handler into the header or body filter chain and process the output coming from the previous handler.
+nginx里的HTTP响应是通过发送响应头和接着可选的响应体产生的。两者被传进filter链里并且最终写到客户端socket。一个nginx模块可以安装它的handler到header或body filter里，并且处理来自上一个handler的输出。
 
-Response header
----------------
+响应头
+------
 
-Output header is sent by the function ngx_http_send_header(r). Prior to calling this function, r->headers_out should contain all the data required to produce the HTTP response header. It's always required to set the status field of r->headers_out. If the response status suggests that a response body follows the header, content_length_n can be set as well. The default value for this field is -1, which means that the body size is unknown. In this case, chunked transfer encoding is used. To output an arbitrary header, headers list should be appended.
+通过函数 ngx_http_send_header(r) 发送输出头。在调用这个函数之前，r->headers_out 必须包含所有被用来发送HTTP响应头的数据。r->headers_out的status字段通常是需要设置的。如果该响应状态码指示响应体应该接着头部，content_length_n 也可以设置。该值默认是-1，表示响应体大小是未知的。这种情况下，就会用到chunked传输。想输出任意的头部，需要加到头部列表里。
 
 ```
 static ngx_int_t
@@ -2325,14 +2325,14 @@ ngx_http_foo_content_handler(ngx_http_request_t *r)
 }
 ```
 
-Header filters
+头部过滤
 --------------
 
-The ngx_http_send_header(r) function invokes the header filter chain by calling the top header filter handler ngx_http_top_header_filter. It's assumed that every header handler calls the next handler in chain until the final handler ngx_http_header_filter(r) is called. The final header handler constructs the HTTP response based on r->headers_out and passes it to the ngx_http_writer_filter for output.
+函数 ngx_http_send_header(r) 通过调用首个头部filter handler ngx_http_top_header_filter 执行头部filter链。它假设所有的header heandle会调用链里的下一个hanndler直到最后一个handler ngx_http_header_filter(r)。 这个最后的handler构造了基于 r->headers_out 的 HTTP 响应并且将它传给 ngx_http_writer_filter 以作输出。
 
-To add a handler to the header filter chain, one should store its address in ngx_http_top_header_filter global variable at configuration time. The previous handler address is normally stored in a module's static variable and is called by the newly added handler before exiting.
+要将一个handler添加到 header filter 链, 需要在配置阶段将它的地址保存在 ngx_http_top_header_filter 这个全局变量。前一个handler的地址通常保存在模块里的一个静态变量，并且在退出前由新加入的handler调用。
 
-The following is an example header filter module, adding the HTTP header "X-Foo: foo" to every output with the status 200.
+以下是个header filter模块的例子，对每个状态是200的输出都加个 "X-Foo: foo" 头部信息。
 
 ```
 #include <ngx_config.h>
@@ -2415,12 +2415,12 @@ ngx_http_foo_header_filter_init(ngx_conf_t *cf)
 }
 ```
 
-Response body
--------------
+响应体
+------
 
-Response body is sent by calling the function ngx_http_output_filter(r, cl). The function can be called multiple times. Each time it sends a part of the response body passed as a buffer chain. The last body buffer should have the last_buf flag set.
+通过函数 ngx_http_output_filter(r, cl) 发响应体。该函数能被调用多次。每次它会发送作为buffer链的响应体的一部份。最后的body buffer应该有设置last_buf标记。
 
-The following example produces a complete HTTP output with "foo" as its body. In order for the example to work not only as a main request but as a subrequest as well, the last_in_chain_flag is set in the last buffer of the output. The last_buf flag is set only for the main request since a subrequest's last buffers does not end the entire output.
+以下例子产生一个完整的HTTP输出 "foo" 作为响应体。为了让这个例子不止能在主请求运行，也在子请求能运行。输出的最后buffer会设置 last_in_chain 标记。标记 last_buf 只会对主请求设置，因为子请求的最后buffer不会作为整个输出的结束。
 
 ```
 static ngx_int_t
@@ -2463,14 +2463,14 @@ ngx_http_bar_content_handler(ngx_http_request_t *r)
 }
 ```
 
-Body filters
+响应体过滤
 ------------
 
-The function ngx_http_output_filter(r, cl) invokes the body filter chain by calling the top body filter handler ngx_http_top_body_filter. It's assumed that every body handler calls the next handler in chain until the final handler ngx_http_write_filter(r, cl) is called.
+函数 ngx_http_output_filter(r, cl) 通过调用首个body filter handler ngx_http_top_body_filter 执行响应体过滤链。它假定每个body handler会调用链里的下一个handler直到最后的handler ngx_http_write_filter(r, cl) 被调用。
 
-A body filter handler receives a chain of buffers. The handler is supposed to process the buffers and pass a possibly new chain to the next handler. It's worth noting that the chain links ngx_chain_t of the incoming chain belong to the caller. They should never be reused or changed. Right after the handler completes, the caller can use its output chain links to keep track of the buffers it has sent. To save the buffer chain or to substitute some buffers before sending further, a handler should allocate its own chain links.
+body filter handler会接收一个buffer链。这个handler会处理 buffers 并且传可能新的chain给下个handler。值得注意的是，传入的ngx_chain_t链接属于调用者。它们不用被复用或者改变。当handler完成后，调用者可以用它的输出链来跟踪其发送的buffer。如果想保存buffer chain或替换一些继续要发送的buffer，该handler应该分配它自己的链。
 
-Following is the example of a simple body filter counting the number of body bytes. The result is available as the $counter variable which can be used in the access log.
+以下是一个简单的计算响应体大小的body模块。结果作为 $counter 变量可以被用在 access 日志。
 
 ```
 #include <ngx_config.h>
@@ -2605,14 +2605,14 @@ ngx_http_counter_filter_init(ngx_conf_t *cf)
 }
 ```
 
-Building filter modules
------------------------
+构建过滤模块
+------------
 
-When writing a body or header filter, a special care should be taken of the filters order. There's a number of header and body filters registered by nginx standard modules. It's important to register a filter module in the right place in respect to other filters. Normally, filters are registered by modules in their postconfiguration handlers. The order in which filters are called is obviously the reverse of when they are registered.
+当写一个body或header过滤模块是，要特别注意filter的顺序。已经有一些已经注册的标准nginx模块。注册一个filter模块到相对其它模块的正确位置是很重要的。通常filter会在模块自己的postconfiguration handler里注册。filter的调用顺序跟它们的注册时的顺序刚好相反。
 
-A special slot HTTP_AUX_FILTER_MODULES for third-party filter modules is provided by nginx. To register a filter module in this slot, the ngx_module_type variable should be set to the value of HTTP_AUX_FILTER in module's configuration.
+nginx给第三方模块提供了个特殊的槽口 HTTP_AUX_FILTER_MODULES。想在这个插槽注册一个filter模块，模块的配置里应该将 ngx_module_type 变量设置值为 HTTP_AUX_FILTER。
 
-The following example shows a filter module config file assuming it only has one source file ngx_http_foo_filter_module.c
+以下例子显示一个filter模块的配置文件，并且假设只有一个源文件 ngx_http_foo_filter_module.c。
 
 ```
 ngx_module_type=HTTP_AUX_FILTER
@@ -2622,12 +2622,12 @@ ngx_module_srcs="$ngx_addon_dir/ngx_http_foo_filter_module.c"
 . auto/module
 ```
 
-Buffer reuse
-------------
+缓冲复用
+--------
 
-When issuing or altering a stream of buffers, it's often desirable to reuse the allocated buffers. A standard approach widely adopted in nginx code is to keep two buffer chains for this purpose: free and busy. The free chain keeps all free buffers. These buffers can be reused. The busy chain keeps all buffers sent by the current module which are still in use by some other filter handler. A buffer is considered in use if its size is greater than zero. Normally, when a buffer is consumed by a filter, its pos (or file_pos for a file buffer) is moved towards last (file_last for a file buffer). Once a buffer is completely consumed, it's ready to be reused. To update the free chain with newly freed buffers, it's enough to iterate over the busy chain and move the zero size buffers at the head of it to free. This operation is so common that there is a special function ngx_chain_update_chains(free, busy, out, tag) which does this. The function appends the output chain out to busy and moves free buffers from the top of busy to free. Only the buffers with the given tag are reused. This lets a module reuse only the buffers allocated by itself.
+当处理或更改缓冲区流时，经常需要复用已分配的buffer。nginx代码里比较标准通用的处理方式是保留两个buffer链：free and busy。 free 链保留所有空闲的 buffer。这些buffer可以拿来复用。busy 链保存所有当前模块发送的buffer，但仍然被其它的filter handler使用。如果它的大小大于0,则认为该buffer还在使用。通常一个buffer被一个filter消费时，它的pos（或file_pos对文件buffer而言）会移向last （或file_pos对文件buffer而言）。一旦整个buffer被完全消费完，它就可以复用了。为将新空闲的buffer更新到空闲chain，需要完整的遍历busy链，并将大小为0的buffer移到free的首部。这种操作很常见，所以有个特殊的函数 ngx_chain_update_chains(free, busy, out, tag) 专门处理这个。这个函数追加output chain到busy，并且将空闲的buffer从busy移到free。只有匹配tag的buffer才能复用。这样就让一个模块只能复用它自己分配的buffer。
 
-The following example is a body filter inserting the “foo” string before each incoming buffer. The new buffers allocated by the module are reused if possible. Note that for this example to work properly, it's also required to set up a header filter and reset content_length_n to -1, which is beyond the scope of this section.
+以下例子为每个新进的buffer加入字符串 "foo"。该模块尽可能的复用这些新分配的buffer。注意：为了让该例子运行的没问题，需要安装header filter，并且将 content_length_n 设置为-1 （这节上面有提到）。
 
 ```
 typedef struct {
