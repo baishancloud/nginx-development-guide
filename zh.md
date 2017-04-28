@@ -1564,18 +1564,13 @@ HTTP
 配置
 -------------
 
-Each HTTP module may have three types of configuration:
+每个HTTP模块都可以有三种类型的配置：
 
-* Main configuration. This configuration applies to the entire nginx http{} block. This is global confi
-guration. It stores global settings for a module
-* Server configuration. This configuraion applies to a single nginx server{}. It stores server-specific
- settings for a module
-* Location configuration. This configuraion applies to a single location{}, if{} or limit_except() bloc
-k. This configuration stores settings specific to a location
+* Main配置。 此配置作用于整个http{}块，属于全局配置。此配置中存储了模块的全局配置。
+* Server配置. 此配置作用于一个server{}块，用于存储模块server特有的配置。
+* Location配置. 此配置作用于一个location{}块，if{}块或者limit_except()块，用于存储location相关的配置。
 
-Configuration structures are created at nginx configuration stage by calling functions, which allocate
-these structures, initialize them and merge. The following example shows how to create a simple module
-location configuration. The configuration has one setting foo of unsiged integer type.
+上述配置的结构体是在nginx的配置阶段，通过调用一系列函数来创建的。这些函数会为配置结构体分配内存，并进行初始化和合并操作。下面的例子演示了如何创建一个简单的location配置。该配置中只有一个无符号整形的配置项foo。
 
 ```
 typedef struct {
@@ -1624,49 +1619,15 @@ ngx_http_foo_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 ```
 
-As seen in the example, ngx_http_foo_create_loc_conf() function creates a new configuration structure a
-nd ngx_http_foo_merge_loc_conf() merges a configuration with another configuration from a higher level.
- In fact, server and location configuration do not only exist at server and location levels, but also c
-reated for all the levels above. Specifically, a server configuration is created at the main level as w
-ell and location configurations are created for main, server and location levels. These configurations
-make it possible to specify server and location-specific settings at any level of nginx configuration f
-ile. Eventually configurations are merged down. To indicate a missing setting and ignore it while mergi
-ng, nginx provides a number of macros like NGX_CONF_UNSET and NGX_CONF_UNSET_UINT. Standard nginx merge
- macros like ngx_conf_merge_value() and ngx_conf_merge_uint_value() provide a convenient way to merge a
- setting and set the default value if none of configurations provided an explicit value. For complete l
-ist of macros for different types see src/core/ngx_conf_file.h.
+在例子中可见，ngx_http_foo_create_loc_conf()函数创建了一个新的配置结构，ngx_http_foo_merge_loc_conf()函数则将配置和更高层次的配置进行合并。实际上，server和location的配置并不仅仅存在于server和location这两个配置层次中，而是为相应更高的配置层次全部进行创建。具体来说，server配置也会在main层次进行创建，而location配置同时会在main, server和location三个层次创建。这些配置使得server和location的配置出现在任何层次的nginx配置中成为了可能。最终各级配置会进行合并。为了在合并的时候识别出缺失的配置并进行忽略，nginx提供了一系列类似于NGX_CONF_UNSET和NGX_CONF_UNSET_UINT这样的宏。标准的nginx合并宏，比如ngx_conf_merge_value()和ngx_conf_merge_uint_value()，提供了一种更加方便的方法来对配置选项进行合并，此外如果在配置文件中没有显式的进行配置，上述合并宏还可以设置默认值。完整的合并宏请参考src/core/ngx_conf_file.h文件。
 
-To access configuration of any HTTP module at configuration time, the following macros are available. T
-hey receive ngx_conf_t reference as the first argument.
+可以使用如下这些宏来再配置阶段访问HTTP模块的配置。它们的第一个参数都是ngx_conf_t类型的指针。
 
 * ngx_http_conf_get_module_main_conf(cf, module)
 * ngx_http_conf_get_module_srv_conf(cf, module)
 * ngx_http_conf_get_module_loc_conf(cf, module)
 
-The following example gets a pointer to a location configuration of standard nginx core module ngx_http
-_core_module and changes location content handler kept in the handler field of the structure.
-
-As seen in the example, ngx_http_foo_create_loc_conf() function creates a new configuration structure a
-nd ngx_http_foo_merge_loc_conf() merges a configuration with another configuration from a higher level.
- In fact, server and location configuration do not only exist at server and location levels, but also c
-reated for all the levels above. Specifically, a server configuration is created at the main level as w
-ell and location configurations are created for main, server and location levels. These configurations
-make it possible to specify server and location-specific settings at any level of nginx configuration f
-ile. Eventually configurations are merged down. To indicate a missing setting and ignore it while mergi
-ng, nginx provides a number of macros like NGX_CONF_UNSET and NGX_CONF_UNSET_UINT. Standard nginx merge
- macros like ngx_conf_merge_value() and ngx_conf_merge_uint_value() provide a convenient way to merge a
- setting and set the default value if none of configurations provided an explicit value. For complete l
-ist of macros for different types see src/core/ngx_conf_file.h.
-
-To access configuration of any HTTP module at configuration time, the following macros are available. T
-hey receive ngx_conf_t reference as the first argument.
-
-* ngx_http_conf_get_module_main_conf(cf, module)
-* ngx_http_conf_get_module_srv_conf(cf, module)
-* ngx_http_conf_get_module_loc_conf(cf, module)
-
-The following example gets a pointer to a location configuration of standard nginx core module ngx_http
-_core_module and changes location content handler kept in the handler field of the structure.
+下面的例子展示了nginx核心模块ngx_http_core_module的location配置的指针，并修改其content handler内容的过程。
 
 ```
 static ngx_int_t ngx_http_foo_handler(ngx_http_request_t *r);
@@ -1697,16 +1658,13 @@ ngx_http_foo(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 ```
 
-In runtime the following macros are available to get configurations of HTTP modules.
+在运行阶段，可以使用下面的这些宏来获取HTTP模块的配置。
 
 * ngx_http_get_module_main_conf(r, module)
 * ngx_http_get_module_srv_conf(r, module)
 * ngx_http_get_module_loc_conf(r, module)
 
-These macros receive a reference to an HTTP request ngx_http_request_t. Main configuration of a request
- never changes. Server configuration may change from a default one after choosing a virtual server for
-a request. Request location configuration may change multiple times as a result of a rewrite or interna
-l redirect. The following example shows how to access HTTP configuration in runtime.
+需要将指向表示HTTP请求的ngx_http_request_t结构体的指针传递给这些宏。对于一个请求，main配置从不会发生变化，server配置会在切换虚拟服务器配置后发生改变。请求的location配置会随着rewrite或者内部重定向而被多次改变。下面的例子展示了如何在运行阶段获取HTTP配置。
 
 ```
 static ngx_int_t
@@ -1721,23 +1679,23 @@ ngx_http_foo_handler(ngx_http_request_t *r)
 ```
 
 
-Phases
-------
-Each HTTP request passes through a list of HTTP phases. Each phase is specialized in a particular type of processing. Most phases allow installing handlers. The phase handlers are called successively once the request reaches the phase. Many standard nginx modules install their phase handlers as a way to get called at a specific request processing stage. Following is the list of nginx HTTP phases.
+阶段
+----
+每个HTTP请求都会经过一系列HTTP阶段（phase），其中每个阶段都会负责处理不同的功能。大部分阶段允许注册handler，这些阶段的handler会在请求到达这个阶段的时候被调用。很多标准nginx模块通过注册阶段handler的方式来实现在某个请求处理阶段被调用模块逻辑。下面是nginx HTTP阶段列表：
 
-* NGX_HTTP_POST_READ_PHASE is the earliest phase. The ngx_http_realip_module installs its handler at this phase. This allows to substitute client address before any other module is invoked
-* NGX_HTTP_SERVER_REWRITE_PHASE is used to run rewrite script, defined at the server level, that is out of any location block. The ngx_http_rewrite_module installs its handler at this phase
-* NGX_HTTP_FIND_CONFIG_PHASE — a special phase used to choose a location based on request URI. This phase does not allow installing any handlers. It only performs the default action of choosing a location. Before this phase, the server default location is assigned to the request. Any module requesting a location configuration, will receive the default server location configuration. After this phase a new location is assigned to the request
-* NGX_HTTP_REWRITE_PHASE — same as NGX_HTTP_SERVER_REWRITE_PHASE, but for a new location, chosen at the prevous phase
-* NGX_HTTP_POST_REWRITE_PHASE — a special phase, used to redirect the request to a new location, if the URI was changed during rewrite. The redirect is done by going back to NGX_HTTP_FIND_CONFIG_PHASE. No handlers are allowed at this phase
-* NGX_HTTP_PREACCESS_PHASE — a common phase for different types of handlers, not associated with access check. Standard nginx modules ngx_http_limit_conn_module and ngx_http_limit_req_module register their handlers at this phase
-* NGX_HTTP_ACCESS_PHASE — used to check access permissions for the request. Standard nginx modules such as ngx_http_access_module and ngx_http_auth_basic_module register their handlers at this phase. If configured so by the satisfy directive, only one of access phase handlers may allow access to the request in order to confinue processing
-* NGX_HTTP_POST_ACCESS_PHASE — a special phase for the satisfy any case. If some access phase handlers denied the access and none of them allowed, the request is finalized. No handlers are supported at this phase
-* NGX_HTTP_TRY_FILES_PHASE — a special phase, for the try_files feature. No handlers are allowed at this phase
-* NGX_HTTP_CONTENT_PHASE — a phase, at which the response is supposed to be generated. Multiple nginx standard modules register their handers at this phase, for example ngx_http_index_module or ngx_http_static_module. All these handlers are called sequentially until one of them finally produces the output. It's also possible to set content handlers on a per-location basis. If the ngx_http_core_module's location configuration has handler set, this handler is called as the content handler and content phase handlers are ignored
-* NGX_HTTP_LOG_PHASE is used to perform request logging. Currently, only the ngx_http_log_module registers its handler at this stage for access logging. Log phase handlers are called at the very end of request processing, right before freeing the request
+* NGX_HTTP_POST_READ_PHASE是最开始的一个阶段。ngx_http_realip_module模块在此注册了handler，这样一来就可以在其他模块被触发之前就替换掉客户端的IP地址。
+* NGX_HTTP_SERVER_REWRITE_PHASE是用来执行server层面rewrite脚本的阶段。ngx_http_rewrite_module模块在这里注册handler。
+* NGX_HTTP_FIND_CONFIG_PHASE — 基于请求URI来查找location的特殊阶段。这个阶段里不允许注册任何handler。该阶段只执行匹配location的动作。在进入到这个阶段之前，请求中的location被设置成了对应server中的默认location，任何模块获取请求的location配置，只会得到默认location的配置。这个阶段之后，请求将会得到新的location配置。
+* NGX_HTTP_REWRITE_PHASE — 和NGX_HTTP_SERVER_REWRITE_PHASE阶段类似，不过是执行上个阶段新选择的location中的rewrite动作。
+* NGX_HTTP_POST_REWRITE_PHASE — 用于将请求重定向到新location的特殊阶段，这种重定向会在URI被rewrite过的情况下发生。重定向是通过重新跳转回NGX_HTTP_FIND_CONFIG_PHASE阶段来实现的。该阶段不允许注册handler。
+* NGX_HTTP_PREACCESS_PHASE — 这是一个可以注册不同类型handler的通用阶段，此时没有进行过访问控制检查。标准nginx模块ngx_http_limit_conn_module和ngx_http_limit_req_module在此阶段注册了handler。
+* NGX_HTTP_ACCESS_PHASE — 对请求进行访问控制权限检查的阶段。ngx_http_access_module和ngx_http_auth_basic_module这些标准nginx模块在此阶段注册handler。如果使用satisfy指令进行相应的配置，则可以实现只要任意一个handler进行了放行，请求就可以继续后续的处理。
+* NGX_HTTP_POST_ACCESS_PHASE — 对于satisfy设置为any时候的特殊阶段。如果某些access阶段的handler阻断了了访问且没有其他handler放行，则请求会被阻断。此阶段不允许注册任何handler。
+* NGX_HTTP_TRY_FILES_PHASE — 实现try_file功能的特殊阶段。此阶段不允许注册任何handler。
+* NGX_HTTP_CONTENT_PHASE — 用于生成HTTP应答的阶段。多个标准nginx模块在此阶段注册handler，例如ngx_http_index_module和ngx_http_static_module模块。所有注册的这些模块handler会被按照顺序调用直到其中的一个生成输出。也可以基于每个location单独设置content handler。如果ngx_http_core_module模块的location配置中的handler成员被设置，则在NGX_HTTP_CONTENT_PHASE阶段此handler会被调用，注册到此阶段的其他handler会被忽略。
+* NGX_HTTP_LOG_PHASE用来对请求记录日志。当前，只有ngx_http_log_module模块在此阶段注册handler以便记录访问日志。Log阶段handler在每个请求结束，但还没被释放的时候被调用。
 
-Following is the example of a preaccess phase handler.
+以下是使用preaccess阶段handler的例子：
 
 ```
 static ngx_http_module_t  ngx_http_foo_module_ctx = {
@@ -1794,22 +1752,22 @@ ngx_http_foo_init(ngx_conf_t *cf)
 }
 ```
 
-Phase handlers are expected to return specific codes:
+阶段的handler可以返回如下返回值：
 
-* NGX_OK — proceed to the next phase
-* NGX_DECLINED — proceed to the next handler of the current phase. If current handler is the last in current phase, move to the next phase
-* NGX_AGAIN, NGX_DONE — suspend phase handling until some future event. This can be for example asynchronous I/O operation or just a delay. It is supposed, that phase handling will be resumed later by calling ngx_http_core_run_phases()
-* Any other value returned by the phase handler is treated as a request finalization code, in particular, HTTP response code. The request is finalized with the code provided
+* NGX_OK — 继续执行下个阶段
+* NGX_DECLINED — 继续执行当前阶段的下一个handler。如果当前handler是本阶段的最后一个handler，则执行下个阶段。
+* NGX_AGAIN, NGX_DONE — 挂起阶段处理直到事件发生。此场景可以用来处理异步I/O操作或者进行延迟处理。阶段处理应该通过对ngx_http_core_run_phases()函数的调用来恢复。
+* 任何其他的返回值都被视为请求结束，尤其是HTTP应答码，这种情况下会以返回的HTTP应答码结束当前请求。
 
-Some phases treat return codes in a slightly different way. At content phase, any return code other that NGX_DECLINED is considered a finalization code. As for the location content handlers, any return from them is considered a finalization code. At access phase, in satisfy any mode, returning a code other than NGX_OK, NGX_DECLINED, NGX_AGAIN, NGX_DONE is considered a denial. If none of future access handlers allow access or deny with a new code, the denial code will become the finalization code.
+一些阶段对返回值的处理稍有不同。在content阶段，除了NGX_DECLINED之外的任何返回值都会被当成结束请求处理。对于location提供的content handler，任何返回值都会别当成结束状态码进行处理。在access阶段，如果使用了satisfy any模式，返回除了NGX_OK，NGX_DECLINED，NGX_AGAIN和NGX_DONE之外的值会被作为阻断处理。如果没有其他的access handler对请求放行或者通过一个返回码阻断，则前述导致阻断的返回值会被当成结束状态码。
 
-Variables
----------
+变量
+----
 
-Accessing existing variables
-----------------------------
+访问已有变量
+----------
 
-Variables may be referenced using index (this is the most common method) or names (see below in the section about creating variables). Index is created at configuration stage, when a variable is added to configuration. The variable index can be obtained using ngx_http_get_variable_index():
+变量可以通过索引（即index，这是最常用的方式）或者名字（参考下文关于创建变量的章节）。索引是在配置阶段，当一个变量添加到配置中的时候创建。变量索引可以通过ngx_http_get_variable_index()函数获取：
 
 ```
 ngx_str_t  name;  /* ngx_string("foo") */
@@ -1818,9 +1776,9 @@ ngx_int_t  index;
 index = ngx_http_get_variable_index(cf, &name);
 ```
 
-Here, the cf is a pointer to nginx configuration and the name points to a string with the variable name. The function returns NGX_ERROR on error or valid index otherwise, which is typically stored somewhere in a module configuration for future use.
+这里，cf变量是一个指向nginx配置的指针，name则指向变量名称字符串。该函数在执行出错时候返回NGX_ERROR，其他情况下典型的做法是将返回的索引存储在模块配置中以便后续使用。
 
-All HTTP variables are evaluated in the context of HTTP request and results are specific to and cached in HTTP request. All functions that evaluate variables return ngx_http_variable_value_t type, representing the variable value:
+所有的HTTP变量都是基于HTTP请求的上下文而计算的，其结果也是与HTTP请求相关并存储于其中。所有用于计算变量的函数的返回值都是ngx_http_variable_value_t类型，该类型代表了一个变量的值。
 
 ```
 typedef ngx_variable_value_t  ngx_http_variable_value_t;
@@ -1837,16 +1795,16 @@ typedef struct {
 } ngx_variable_value_t;
 ```
 
-where:
+说明：
 
-* len — length of a value
-* data — value itself
-* valid — value is valid
-* not_found — variable was not found and thus the data and len fields are irrelevant; this may happen, for example, with such variables as $arg_foo when a corresponding argument was not passed in a request
-* no_cacheable — do not cache result
-* escape — used internally by the logging module to mark values that require escaping on output
+* len — 值的长度
+* data — 值本身
+* valid — 值是有效的
+* not_found — 变量没有找到，因此data和len成员无意义；例如，像尝试获取$arg_foo这种类型的变量的值，而请求中却没有名为foo的参数时，就可能发生这种情况。
+* no_cacheable — 禁止缓存结果值
+* escape — 由日志模块内部使用，用来标记在输出时需要进行转移的变量值
 
-The ngx_http_get_flushed_variable() and ngx_http_get_indexed_variable() functions are used to obtain the variable value. They have the same interface - accepting a HTTP request r as a context for evaluating the variable and an index, identifying it. Example of typical usage:
+ngx_http_get_flushed_variable()和ngx_http_get_indexed_variable()函数用来获取变量值。它们拥有相同的接口 —— 一个HTTP请求r作为计算变量值的上下文以及一个index参数，用于指示哪个变量。以下是一个典型的用法：
 
 ```
 ngx_http_variable_value_t  *v;
@@ -1861,21 +1819,21 @@ if (v == NULL || v->not_found) {
 /* some meaningful value is found */
 ```
 
-The difference between functions is that the ngx_http_get_indexed_variable() returns cached value and ngx_http_get_flushed_variable() flushes cache for non-cacheable variables.
+这两个函数的区别是，ngx_http_get_indexed_variable()返回缓存的变量值而ngx_http_get_flushed_variable()函数对于不可缓存的变量进行刷新处理。
 
-There are cases when it is required to deal with variables which names are not known at configuration time and thus they cannot be accessed using indexes, for example in modules like SSI or Perl. The ngx_http_get_variable(r, name, key) function may be used in such cases. It searches for the variable with a given name and its hash key.
+有一些场景中需要处理那些在配置阶段还不知道名字的变量，这些变量无法通过使用索引来访问，例如SSI和Perl模块。对于这类场景，可以使用ngx_http_get_variable(r, name, key)函数。该函数通过变量名字和它的哈希key来查找变量。
 
-Creating variables
-------------------
+创建变量
+-------
 
-To create a variable ngx_http_add_variable() function is used. It takes configuration (where variable is registered), variable name and flags that control its behaviour:
+ngx_http_add_variable()函数用来创建一个变量。其参数有：配置（注册变量的配置），变量名和用来控制变量行为的标记位：
 
-* NGX_HTTP_VAR_CHANGEABLE  — allows redefining the variable; If another module will define a variable with such name, no conflict will happen. For example, this allows user to override variables using the set directive.
-* NGX_HTTP_VAR_NOCACHEABLE  — disables caching, is useful for such variables as $time_local
-* NGX_HTTP_VAR_NOHASH  — indicates that this variable is only accessible by index, not by name. This is a small optimization which may be used when it is known that the variable is not needed in modules like SSI or Perl.
-* NGX_HTTP_VAR_PREFIX  — the name of this variable is a prefix. A handler must implement additional logic to obtain value of specific variable. For example, all “arg_” variables are processed by the same handler which performs lookup in request arguments and returns value of specific argument.
+* NGX_HTTP_VAR_CHANGEABLE  — 允许变量被重新定义；如果另外一个模块使用同样的名字定义变量，不会产生冲突。例如，这个特点允许用户使用set指令覆盖变量。
+* NGX_HTTP_VAR_NOCACHEABLE  — 禁止缓存，在类似于$time_local这样的变量上使用。
+* NGX_HTTP_VAR_NOHASH  — 标识这个变量只能通过索引访问，不允许通过变量名访问。这是一个小的优化，可以在类似于SSI或者Perl这样的模块中不需要此变量的时候使用。
+* NGX_HTTP_VAR_PREFIX  — 该变量的名字是一个前缀。相关的handler必须实现额外的逻辑来获取指定的变量值。例如，所有"arg_"变量都被同一个handler处理，该handler在请求的参数中查找并返回对应的参数值。
 
-The function returns NULL in case of error or a pointer to ngx_http_variable_t:
+此函数在失败时返回NULL，否则返回一个指向ngx_http_variable_t类型的指针：
 
 ```
 struct ngx_http_variable_s {
@@ -1888,9 +1846,9 @@ struct ngx_http_variable_s {
 };
 ```
 
-The get and set handlers are called to obtain or set the variable value, data will be passed to variable handlers, index will hold assigned variable index, used to reference the variable.
+get和set handler被用来获取以及设置变量的值，data成员会被传递给变量handler，index成员中存储的是分配的变量索引，用来引用变量。
 
-Usually, a null-terminated static array of such structures is created by a module and processed at the preconfiguration stage to add variables into configuration:
+通常，一个以null结尾的上述结构体数组会在模块中创建，并在preconfiguration阶段将数组中的变量添加到配置中：
 
 ```
 static ngx_http_variable_t  ngx_http_foo_vars[] = {
@@ -1919,9 +1877,9 @@ ngx_http_foo_add_variables(ngx_conf_t *cf)
 }
 ```
 
-This function is used to initialize the preconfiguration field of the HTTP module context and is called before parsing HTTP configuration, so it could refer to these variables.
+HTTP模块上下文中的preconfiguration成员会被赋值为这个函数，并在解析HTTP配置之前被调用，所以它可以处理这些变量。
 
-The get handler is responsible for evaluating the variable in a context of specific request, for example:
+get handler负责为某个请求计算变量的值，例如：
 
 ```
 static ngx_int_t
@@ -1945,9 +1903,9 @@ ngx_http_variable_connection(ngx_http_request_t *r,
 }
 ```
 
-It returns NGX_ERROR in case of internal error (for example, failed memory allocation) or NGX_OK otherwise. The status of variable evaluation may be understood by inspecting flags of the ngx_http_variable_value_t (see description above).
+如果内部出现错误（比如分配内存失败）则返回NGX_ERROR，否则返回NGX_OK。变量计算结果的状态可以通过ngx_http_variable_value_t的flags成员的值来了解（参考前文相关描述）。
 
-The set handler allows setting the property referred by the variable. For example, the $limit_rate variable set handler modifies the request's limit_rate field:
+set handler允许设置变量所指向的属性。例如，$limit_rate变量的set handler修改了请求的limit_rate成员的值：
 
 ```
 ...
@@ -1983,12 +1941,12 @@ ngx_http_variable_request_set_size(ngx_http_request_t *r,
 }
 ```
 
-Complex values
---------------
+复杂值
+-------
 
-A complex value, despite its name, provides an easy way to evaluate expressions that may contain text, variables, and their combination.
+复杂值提供了一种简单的方法来计算一个包含有文本、变量以及文本变量组合等情况的表达式的值。
 
-The complex value description in ngx_http_compile_complex_value is compiled at the configuration stage into ngx_http_complex_value_t which is used at runtime to obtain evaluated expression results.
+由ngx_http_compile_complex_value所表示的复杂值在配置阶段被编译到ngx_http_complex_value_t类型中，该编译的结果在运行阶段可以被用来计算表达式的值。
 
 ```
 ngx_str_t                         *value;
@@ -2010,22 +1968,22 @@ if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
 }
 ```
 
-Here, ccv holds all parameters that are required to initialize the complex value cv:
+这里，ccv里包含了全部初始化复杂值cv所需的参数：
 
-* cf — configuration pointer
-* value — string for parsing (input)
-* complex_value — compiled value (output)
-* zero — flag that enables zero-terminating value
-* conf_prefix — prefixes result with configuration prefix (the directory where nginx is currently looking for configuration)
-* root_prefix — prefixes result with root prefix (this is the normal nginx installation prefix)
+* cf — 配置指针
+* value — 待解析的字符串 (输入)
+* complex_value — 编译后的值 (输出)
+* zero — 是否对结果进行0结尾处理
+* conf_prefix — 是否将结果带上配置前缀（nginx当前查找配置的目录）
+* root_prefix — 是否将结果带上根前缀（通常是nginx的安装目录）
 
-The zero flag is usable when results are to be passed to libraries that require zero-terminated strings, and prefixes are handy when dealing with filenames.
+zero标记位在需要把结果传递给要求0结尾字符串的库时，非常有用，而前缀相关的标记位在处理文件名时很方便。
 
-Upon successful compilation, cv.lengths may be inspected to get information about the presence of variables in the expression. The NULL value means that the expression contained static text only, and there is no need in storing it as a complex value, so a simple string can be used.
+对于正确的编译，可以从cv.lengths成员获取到表达式中是否存在变量的情况。如果为NULL，则表示表达式中只是纯文本，所以没有必要将其保存成一个复杂值，使用简单的字符串就可以了。
 
-The ngx_http_set_complex_value_slot() is a convenient function used to initialize complex value completely right in the directive declaration.
+ngx_http_set_complex_value_slot()可以在声明指令的时候对复杂值进行初始化。
 
-At runtime, a complex value may be calculated using the ngx_http_complex_value() function:
+在运行阶段，复杂值可以使用ngx_http_complex_value()函数来计算：
 
 ```
 ngx_str_t  res;
@@ -2035,10 +1993,10 @@ if (ngx_http_complex_value(r, &cv, &res) != NGX_OK) {
 }
 ```
 
-Given the request r and previously compiled value cv the function will evaluate expression and put result into res.
+给定请求r和之前编译的cv，该函数会对表达式的值进行急计算并将结果存放在res变量中。
 
-Request redirection
--------------------
+请求重定向
+---------
 
 An HTTP request is always connected to a location via the loc_conf field of the ngx_http_request_t structure. This means that at any point the location configuration of any module can be retrieved from the request by calling ngx_http_get_module_loc_conf(r, module). Request location may be changed several times throughout its lifetime. Initially, a default server location of the default server is assigned to a request. Once a request switches to a different server (chosen by the HTTP “Host” header or SSL SNI extension), the request switches to the default location of that server as well. The next change of the location takes place at the NGX_HTTP_FIND_CONFIG_PHASE request phase. At this phase a location is chosen by request URI among all non-named locations configured for the server. The ngx_http_rewrite_module may change the request URI at the NGX_HTTP_REWRITE_PHASE request phase as a result of rewrite and return to the NGX_HTTP_FIND_CONFIG_PHASE phase for choosing a new location based on the new URI.
 
@@ -2081,8 +2039,8 @@ Both functions ngx_http_internal_redirect(r, uri, args) and ngx_http_named_locat
 
 Redirected and rewritten requests become internal and may access the internal locations. Internal requests have the internal flag set.
 
-Subrequests
------------
+子请求
+-----
 
 Subrequests are primarily used to include output of one request into another, possibly mixed with other data. A subrequest looks like a normal request, but shares some data with its parent. Particularly, all fields related to client input are shared since a subrequest does not receive any other input from client. The request field parent for a subrequest keeps a link to its parent request and is NULL for the main request. The field main keeps a link to the main request in a group of requests.
 
@@ -2222,8 +2180,8 @@ ngx_http_foo_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 A subrequest may also be created for other purposes than data output. For example, the ngx_http_auth_request_module creates a subrequest at NGX_HTTP_ACCESS_PHASE phase. To disable any output at this point, the subrequest header_only flag is set. This prevents subrequest body from being sent to the client. Its header is ignored anyway. The result of the subrequest can be analyzed in the callback handler.
 
-Request finalization
---------------------
+请求结束
+-------
 
 An HTTP request is finalized by calling the function ngx_http_finalize_request(r, rc). It is usually finalized by the content handler after sending all output buffers to the filter chain. At this point the output may not be completely sent to the client, but remain buffered somewhere along the filter chain. If it is, the ngx_http_finalize_request(r, rc) function will automatically install a special handler ngx_http_writer(r) to finish sending the output. A request is also finalized in case of an error or if a standard HTTP response code needs to be returned to the client.
 
@@ -2234,8 +2192,8 @@ The function ngx_http_finalize_request(r, rc) expects the following rc values:
 * NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), codes greater than or equal to NGX_HTTP_SPECIAL_RESPONSE (300) - special response finalization. For these values nginx either sends a default code response page to the client or performs the internal redirect to an error_page location if it's configured for the code
 * Other codes are considered success finalization codes and may activate the request writer to finish sending the response body. Once body is completely sent, request count is decremented. If it reaches zero, the request is destroyed, but the client connection may still be used for other requests. If count is positive, there are unfinished activities within the request, which will be finalized at a later point.
 
-Request body
-------------
+请求体
+------
 
 For dealing with client request body, nginx provides the following functions: ngx_http_read_client_request_body(r, post_handler) and ngx_http_discard_request_body(r). The first function reads the request body and makes it available via the request_body request field. The second function instructs nginx to discard (read and ignore) the request body. One of these functions must be called for every request. Normally, it is done in the content handler.
 
