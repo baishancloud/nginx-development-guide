@@ -1998,13 +1998,13 @@ if (ngx_http_complex_value(r, &cv, &res) != NGX_OK) {
 请求重定向
 ---------
 
-An HTTP request is always connected to a location via the loc_conf field of the ngx_http_request_t structure. This means that at any point the location configuration of any module can be retrieved from the request by calling ngx_http_get_module_loc_conf(r, module). Request location may be changed several times throughout its lifetime. Initially, a default server location of the default server is assigned to a request. Once a request switches to a different server (chosen by the HTTP “Host” header or SSL SNI extension), the request switches to the default location of that server as well. The next change of the location takes place at the NGX_HTTP_FIND_CONFIG_PHASE request phase. At this phase a location is chosen by request URI among all non-named locations configured for the server. The ngx_http_rewrite_module may change the request URI at the NGX_HTTP_REWRITE_PHASE request phase as a result of rewrite and return to the NGX_HTTP_FIND_CONFIG_PHASE phase for choosing a new location based on the new URI.
+HTTP请求总是通过ngx_http_request_t结构体的loc_conf成员来绑定到某个location上。这意味着在任意时刻，任何模块都可以通过调用ngx_http_get_module_loc_conf(r, module)来获取到location的配置。在HTTP请求的生命周期内，其location可能会改变多次。初始时，default server的default location会被分配给HTTP请求。一旦这个请求切换到了另外一个不同的server（比如通过HTTP的"Host"头，或者通过SSL的SNI扩展），该server的default location也同样会分配给这个请求。接下来在NGX_HTTP_FIND_CONFIG_PHASE阶段中会重新为请求选择location。在这个阶段里，location的选择是基于请求的URI，在此server中全部的非命名location中查找得来的。ngx_http_rewrite_module模块也可能在NGX_HTTP_REWRITE_PHASE阶段对请求的URI进行修改，这样的话请求会重新发送回NGX_HTTP_FIND_CONFIG_PHASE阶段使用新的URI进行location匹配。
 
-It is also possible to redirect a request to a new location at any point by calling one of the functions ngx_http_internal_redirect(r, uri, args) or ngx_http_named_location(r, name).
+也可以在任意时候通过对ngx_http_internal_redirect(r, uri, args)和ngx_http_named_location(r, name)函数进行调用来实现将请求重定向到一个新的location。
 
-The function ngx_http_internal_redirect(r, uri, args) changes the request URI and returns the request to the NGX_HTTP_SERVER_REWRITE_PHASE phase. The request proceeds with a server default location. Later at NGX_HTTP_FIND_CONFIG_PHASE a new location is chosen based on the new request URI.
+ngx_http_internal_redirect(r, uri, args)函数修改请求的URI并且将请求发送回NGX_HTTP_SERVER_REWRITE_PHASE阶段。之后请求被分配到server默认的location上，然后在NGX_HTTP_FIND_CONFIG_PHASE阶段根据请求新的URI来选择location。
 
-The following example performs an internal redirect with the new request arguments.
+下面是一个同时带有新的请求参数的内部重定向的例子。
 
 ```
 ngx_int_t
@@ -2021,7 +2021,9 @@ ngx_http_foo_redirect(ngx_http_request_t *r)
 
 The function ngx_http_named_location(r, name) redirects a request to a named location. The name of the location is passed as the argument. The location is looked up among all named locations of the current server, after which the requests switches to the NGX_HTTP_REWRITE_PHASE phase.
 
-The following example performs a redirect to a named location @foo.
+ngx_http_named_location(r, name)函数将请求重定向到一个命名location。目标location的名称通过参数传递，并在当前server中的全部命名location中查找，接着请求会被发送到NGX_HTTP_REWRITE_PHASE阶段。
+
+下面是一个将请求重定向到命名location @foo的例子：
 
 ```
 ngx_int_t
@@ -2035,9 +2037,9 @@ ngx_http_foo_named_redirect(ngx_http_request_t *r)
 }
 ```
 
-Both functions ngx_http_internal_redirect(r, uri, args) and ngx_http_named_location(r, name) may be called when a request already has some contexts saved in its ctx field by nginx modules. These contexts could become inconsistent with the new location configuration. To prevent inconsistency, all request contexts are erased by both redirect functions.
+当ngx_http_internal_redirect(r, uri, args)和ngx_http_named_location(r, name)这两个函数被调用时，nginx模块可能已经向HTTP请求的ctx成员中存储了一些上下文。这些上下文在请求发生location切换之后可能会变得不一致。为了避免这种不一致性，所有的请求上下文会被这两个函数清除。
 
-Redirected and rewritten requests become internal and may access the internal locations. Internal requests have the internal flag set.
+被重定向以及被重写的请求成为了内部请求进而可以访问内部location。内部请求的internal标记位被设置为真。
 
 子请求
 -----
