@@ -2044,26 +2044,28 @@ ngx_http_foo_named_redirect(ngx_http_request_t *r)
 子请求
 -----
 
-Subrequests are primarily used to include output of one request into another, possibly mixed with other data. A subrequest looks like a normal request, but shares some data with its parent. Particularly, all fields related to client input are shared since a subrequest does not receive any other input from client. The request field parent for a subrequest keeps a link to its parent request and is NULL for the main request. The field main keeps a link to the main request in a group of requests.
+子请求主要用来将一个请求的输出合并到另外一个请求中，很可能和其他数据混合。一个子请求看起来就像是一个普通的请求，但是和其父请求共享某些数据。具体来说，所有和客户端输入相关的数据都是共享的，因为子请求不从客户端接收任何额外的数据。子请求的请求结构中的parent成员保存了指向其父请求的指针，如果是main request则此成员为空。成员main存储了指向一组请求中main请求的指针。
 
-A subrequest starts with NGX_HTTP_SERVER_REWRITE_PHASE phase. It passes through the same phases as a normal request and is assigned a location based on its own URI.
+子请求从NGX_HTTP_SERVER_REWRITE_PHASE阶段开始。它经历的其他阶段和普通请求相同，并基于其URI来分配location。
 
-Subrequest output header is always ignored. Subrequest output body is placed by the ngx_http_postpone_filter into the right position in relation to other data produced by the parent request.
+子请求的输出头总是被忽略。子请求的输出体通过ngx_http_postpone_filter插入到父请求产生的数据中的合适位置。
 
-Subrequests are related to the concept of active requests. A request r is considered active if c->data == r, where c is the client connection object. At any point, only the active request in a request group is allowed to output its buffers to the client. A non-active request can still send its data to the filter chain, but they will not pass beyond the ngx_http_postpone_filter and will remain buffered by that filter until the request becomes active. Here are some rules of request activation:
+子请求和活动请求的概念相关。一个请求r被认为是活动的，如果c->data == r，c是表示nginx和客户端连接的对象。在任意时候，只有一组请求中的活动请求才允许将其输出缓冲发送给客户端。一个非活动请求仍然可以将其数据发送到过滤链中，但是这些数据不会通过ngx_http_postpone_filter过滤并且数据会一直保留在这个过滤器中，直到请求变成活动状态。下面是一些关于请求活动性的规则：
 
-* Initially, the main request is active
-* The first subrequest of an active request becomes active right after creation
-* The ngx_http_postpone_filter activates the next request in active request's subrequest list, once all data prior to that request are sent
-* When a request is finalized, its parent is activated
+* 开始时，main请求是活动的
+* 一个活动请求的第一个子请求在被创建之后立刻变为活动的
+* 如果活动请求的子请求队列上的下一个请求之前的数据都已经发送完，则ngx_http_postpone_filter会将此请求激活
+* 当一个请求结束了，它的父请求变为活动请求
 
 A subrequest is created by calling the function ngx_http_subrequest(r, uri, args, psr, ps, flags), where r is the parent request, uri and args are URI and arguments of the subrequest, psr is the output parameter, receiving the newly created subrequest reference, ps is a callback object for notifying the parent request that the subrequest is being finalized, flags is subrequest creation flags bitmask. The following flags are available:
 
-* NGX_HTTP_SUBREQUEST_IN_MEMORY - subrequest output should not be sent to the client, but rather stored in memory. This only works for proxying subrequests. After subrequest finalization its output is available in r->upstream->buffer buffer of type ngx_buf_t
-* NGX_HTTP_SUBREQUEST_WAITED - the subrequest done flag is set even if it is finalized being non-active. This subrequest flag is used by the SSI filter
-* NGX_HTTP_SUBREQUEST_CLONE - the subrequest is created as a clone of its parent. It is started at the same location and proceeds from the same phase as the parent request
+一个子请求是用过调用ngx_http_subrequest(r, uri, args, psr, ps, flags)函数来创建的，其中r是父请求，uri和args分别是子请求的URI和请求参数，psr是一个输出参数，含有新创建的子请求的引用，ps是一个回调函数，用来在子请求结束的时候通知父请求，flags是子请求的创建标记位。有如下标记位可以使用：
 
-The following example creates a subrequest with the URI of "/foo".
+* NGX_HTTP_SUBREQUEST_IN_MEMORY - 子请求的输出不需要发送给客户端，而是在内存中保留。此标记位只对代理子请求有效。在子请求结束后，它的输出会以ngx_buf_t类型存放在r->upstream->buffer中。
+* NGX_HTTP_SUBREQUEST_WAITED - 子请求的done标记位会被设置，即使当其结束时处于非活动状态。这个标记位被SSI过滤器使用。
+* NGX_HTTP_SUBREQUEST_CLONE - 子请求作为父请求的克隆来创建。如此创建的子请求将继承父请求的location并从父请求所在的阶段继续执行。
+
+下面的例子中创建了一个URI为"/foo"的子请求。
 
 ```
 ngx_int_t            rc;
@@ -2080,7 +2082,7 @@ if (rc == NGX_ERROR) {
 }
 ```
 
-This example clones the current request and sets a finalization callback for the subrequest.
+这个例子是将当前请求进行克隆并为子请求设置了一个结束回调函数。
 
 ```
 ngx_int_t
@@ -2114,7 +2116,7 @@ ngx_http_foo_subrequest_done(ngx_http_request_t *r, void *data, ngx_int_t rc)
 }
 ```
 
-Subrequests are normally created in a body filter. In this case subrequest output can be treated as any other explicit request output. This means that eventually the output of a subrequest is sent to the client after all explicit buffers passed prior to subrequest creation and before any buffers passed later. This ordering is preserved even for large hierarchies of subrequests. The following example inserts a subrequest output after all request data buffers, but before the final buffer with the last_buf flag.
+子请求通常在body过滤器中创建。在这种情况下，子请求的输出可以被当成任意的显式请求输出处理。这意味着子请求的输出会在其他全部先于子请求创建的显式缓冲之后，以及在除此之外的任何缓冲之前，发送给客户端。这个顺序对于大型的子请求层次结构也同样有效。下面演示了将一个子请求插入到所有请求数据缓冲之后，但是在拥有last_buf的最后一个缓冲之前的例子。
 
 ```
 ngx_int_t
@@ -2180,16 +2182,16 @@ ngx_http_foo_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 }
 ```
 
-A subrequest may also be created for other purposes than data output. For example, the ngx_http_auth_request_module creates a subrequest at NGX_HTTP_ACCESS_PHASE phase. To disable any output at this point, the subrequest header_only flag is set. This prevents subrequest body from being sent to the client. Its header is ignored anyway. The result of the subrequest can be analyzed in the callback handler.
+一个子请求也可以为了输出数据之外的目的而创建。例如，ngx_http_auth_request_module在NGX_HTTP_ACCESS_PHASE阶段创建了一个子请求。为了在这个阶段禁止任何输出，子请求的header_only标志被设置。这可以避免子请求的body被发送到客户端。子请求的header无论如何都是被忽略的。子请求的结果可以通过回调handler来分析处理。
 
 请求结束
 -------
 
-An HTTP request is finalized by calling the function ngx_http_finalize_request(r, rc). It is usually finalized by the content handler after sending all output buffers to the filter chain. At this point the output may not be completely sent to the client, but remain buffered somewhere along the filter chain. If it is, the ngx_http_finalize_request(r, rc) function will automatically install a special handler ngx_http_writer(r) to finish sending the output. A request is also finalized in case of an error or if a standard HTTP response code needs to be returned to the client.
+一个HTTP请求通过调用ngx_http_finalize_request(r, rc)来完成其生命周期。这通常是content handler在向过滤链发送完全部输出数据后执行的。在这个时候，数据有可能还没有全部发送到客户端，而是其中一部分依然缓存在过滤链的某处。如果是这样，ngx_http_finalize_request(r, rc)函数会自动注册一个特殊的handlerngx_http_writer(r)来完成数据的发送。一个请求也可能是因为产生了某种错误或者因为标准的HTTP响应码需要被返回给客户端，而被终结。
 
-The function ngx_http_finalize_request(r, rc) expects the following rc values:
+ngx_http_finalize_request(r, rc)函数接受如下的rc参数值：
 
-* NGX_DONE - fast finalization. Decrement request count and destroy the request if it reaches zero. The client connection may still be used for more requests after that
+* NGX_DONE - 快速结束。减少请求引用计数并且如果为0的话就销毁请求。和客户端的连接可能会被继续复用。
 * NGX_ERROR, NGX_HTTP_REQUEST_TIME_OUT (408), NGX_HTTP_CLIENT_CLOSED_REQUEST (499) - error finalization. Terminate the request as soon as possible and close the client connection.
 * NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), codes greater than or equal to NGX_HTTP_SPECIAL_RESPONSE (300) - special response finalization. For these values nginx either sends a default code response page to the client or performs the internal redirect to an error_page location if it's configured for the code
 * Other codes are considered success finalization codes and may activate the request writer to finish sending the response body. Once body is completely sent, request count is decremented. If it reaches zero, the request is destroyed, but the client connection may still be used for other requests. If count is positive, there are unfinished activities within the request, which will be finalized at a later point.
