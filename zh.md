@@ -1266,7 +1266,6 @@ ngx_int_t ngx_thread_cond_wait(ngx_thread_cond_t *cond, ngx_thread_mutex_t *mtx,
 ```
 
 nginx实现了线程池策略，而不是为每个任务创建一个线程。可以配置多个线程池用于不同的目的（举例，在不同的碰盘组上执行I/O）。每个线程池在启动时创建，并且包含一定数目的线程用来处理一个任务队列。当任务完成时，预定的handler就会被调用。
-imited number of threads that process a queue of tasks. When a task is completed, a predefined completion handler is called.
 
 头文件 src/core/ngx_thread_pool.h 包含了对应的定义：
 
