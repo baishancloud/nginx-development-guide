@@ -1,5 +1,5 @@
 Development guide
-===========
+=================
 
 * [Introduction](#introduction)
     * [Code layout](#code-layout)
@@ -12,6 +12,7 @@ Development guide
     * [Formatting](#formatting)
     * [Numeric conversion](#numeric-conversion)
     * [Regular expressions](#regular-expressions)
+* [Time](#time)
 * [Containers](#containers)
     * [Array](#array)
     * [List](#list)
@@ -34,6 +35,7 @@ Development guide
     * [Posted events](#posted-events)
     * [Event loop](#event-loop)
 * [Processes](#processes)
+* [Threads](#threads)
 * [Modules](#modules)
     * [Adding new modules](#adding-new-modules)
     * [Core modules](#core-modules)
@@ -328,6 +330,44 @@ for (i = 0; i < rc.named_captures; i++, p += size) {
 ```
 
 The ngx_regex_exec_array() function accepts the array of ngx_regex_elt_t elements (which are just compiled regular expressions with associated names), a string to match and a log. The function will apply expressions from the array to the string until the match is found or no more expressions are left. The return value is NGX_OK in case of match and NGX_DECLINED otherwise, or NGX_ERROR in case of error.
+
+
+Time
+====
+
+The ngx_time_t structure represents time split into seconds and milliseconds with specification of GMT offset:
+
+```
+typedef struct {
+    time_t      sec;
+    ngx_uint_t  msec;
+    ngx_int_t   gmtoff;
+} ngx_time_t;
+```
+
+The ngx_tm_t is an alias for struct tm on UNIX platforms and SYSTEMTIME on Windows.
+
+To obtain current time, usually it is enough to access one of available global variables, representing the cached time value in desired format. The ngx_current_msec variable holds milliseconds elapsed since Epoch and truncated to ngx_msec_t.
+
+Available string representations are:
+
+* ngx_cached_err_log_time — used in error log: "1970/09/28 12:00:00"
+* ngx_cached_http_log_time — used in HTTP access log: "28/Sep/1970:12:00:00 +0600"
+* ngx_cached_syslog_time — used in syslog: "Sep 28 12:00:00"
+* ngx_cached_http_time — used in HTTP for headers: "Mon, 28 Sep 1970 06:00:00 GMT"
+* ngx_cached_http_log_iso8601 — in the ISO 8601 standard format: "1970-09-28T12:00:00+06:00"
+
+The ngx_time() and ngx_timeofday() macros returning current value of seconds are a preferred way to access cached time value.
+
+To obtain the time explicitly, ngx_gettimeofday() may be used, which updates its argument (pointer to struct timeval). Time is always updated when nginx returns to event loop from system calls. To update the time immediately, call ngx_time_update(), or ngx_time_sigsafe_update() if you need it in the signal handler context.
+
+The following functions convert time_t into broken-down time representation, either ngx_tm_t or struct tm for those with libc prefix:
+
+* ngx_gmtime(), ngx_libc_gmtime() — result time is UTC
+* ngx_localtime(), ngx_libc_localtime() — result time is relative to the timezone
+
+The ngx_http_time(buf, time) returns string representation suitable for use with HTTP headers (for example, "Mon, 28 Sep 1970 06:00:00 GMT"). Another possible conversion is provided by ngx_http_cookie_time(buf, time) that produces format suitable for HTTP cookies ("Thu, 31-Dec-37 23:55:55 GMT").
+
 
 Containers
 ==========
@@ -1216,6 +1256,107 @@ All nginx processes handle the following signals:
 While all nginx worker processes are able to receive and properly handle POSIX signals, master process normally does not pass any signals to workers and helpers with the standard kill() syscall. Instead, nginx uses inter-process channels which allow sending messages between all nginx processes. Currently, however, messages are only sent from master to its children. Those messages carry the same signals. The channels are socketpairs with their ends in different processes.
 
 When running nginx binary, several values can be specified next to -s parameter. Those values are stop, quit, reopen, reload. They are converted to signals NGX_TERMINATE_SIGNAL, NGX_SHUTDOWN_SIGNAL, NGX_REOPEN_SIGNAL and NGX_RECONFIGURE_SIGNAL and sent to the nginx master process, whose pid is read from nginx pid file.
+
+Threads
+=======
+
+It is possible to offload tasks that would otherwise block nginx worker process into a separate thread. For example, nginx may be configured to use threads to perform file I/O. Another example is using a library that doesn't have asynchronous interface and thus cannot be normally used with nginx. Keep in mind that threads interface is a helper for existing asynchronous approach in processing client connections, and by no means a replacement.
+
+To deal with synchronization the following wrappers over pthreads primitives are available:
+
+```
+typedef pthread_mutex_t  ngx_thread_mutex_t;
+
+ngx_int_t ngx_thread_mutex_create(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_destroy(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_lock(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_unlock(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+
+typedef pthread_cond_t  ngx_thread_cond_t;
+
+ngx_int_t ngx_thread_cond_create(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_destroy(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_signal(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_wait(ngx_thread_cond_t *cond, ngx_thread_mutex_t *mtx,
+    ngx_log_t *log);
+```
+
+Instead of creating a new thread for each task, nginx implements a thread_pool strategy. Multiple thread pools may be configured intended for different purposes (for example, performing I/O on different sets of disks). Each thread pool is created on start and contains a limited number of threads that process a queue of tasks. When a task is completed, a predefined completion handler is called.
+
+The src/core/ngx_thread_pool.h header file contains corresponding definitions:
+
+```
+struct ngx_thread_task_s {
+    ngx_thread_task_t   *next;
+    ngx_uint_t           id;
+    void                *ctx;
+    void               (*handler)(void *data, ngx_log_t *log);
+    ngx_event_t          event;
+};
+
+typedef struct ngx_thread_pool_s  ngx_thread_pool_t;
+
+ngx_thread_pool_t *ngx_thread_pool_add(ngx_conf_t *cf, ngx_str_t *name);
+ngx_thread_pool_t *ngx_thread_pool_get(ngx_cycle_t *cycle, ngx_str_t *name);
+
+ngx_thread_task_t *ngx_thread_task_alloc(ngx_pool_t *pool, size_t size);
+ngx_int_t ngx_thread_task_post(ngx_thread_pool_t *tp, ngx_thread_task_t *task);
+```
+
+At configuration time, a module willing to use threads has to obtain a reference to thread pool by calling ngx_thread_pool_add(cf, name) which will either create a new thread pool with given name or return a reference to an existing one if a pool with such name already exists.
+
+At runtime, the ngx_thread_task_post(tp, task) function is used to add a task into a queue of a thread pool tp. The ngx_thread_task_t structure contains all necessary to execute user function in thread, pass parameters and setup completion handler:
+
+```
+typedef struct {
+    int    foo;
+} my_thread_ctx_t;
+
+
+static void
+my_thread_func(void *data, ngx_log_t *log)
+{
+    my_thread_ctx_t *ctx = data;
+
+    /* this function is executed in a separate thread */
+}
+
+
+static void
+my_thread_completion(ngx_event_t *ev)
+{
+    my_thread_ctx_t *ctx = ev->data;
+
+    /* executed in nginx event loop */
+}
+
+
+ngx_int_t
+my_task_offload(my_conf_t *conf)
+{
+    my_thread_ctx_t    *ctx;
+    ngx_thread_task_t  *task;
+
+    task = ngx_thread_task_alloc(conf->pool, sizeof(my_thread_ctx_t));
+    if (task == NULL) {
+        return NGX_ERROR;
+    }
+
+    ctx = task->ctx;
+
+    ctx->foo = 42;
+
+    task->handler = my_thread_func;
+    task->event.handler = my_thread_completion;
+    task->event.data = ctx;
+
+    if (ngx_thread_task_post(conf->thread_pool, task) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+```
 
 Modules
 =======

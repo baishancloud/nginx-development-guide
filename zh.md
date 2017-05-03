@@ -13,6 +13,7 @@ NGINX开发指南
     * [格式化](#格式化)
     * [数值转换](#数值转换)
     * [正则表达式](#正则表达式)
+* [时间](#时间)
 * [容器](#容器)
     * [数组](#数组)
     * [列表](#列表)
@@ -35,6 +36,7 @@ NGINX开发指南
     * [延迟事件](#延迟事件)
     * [遍历事件](#遍历事件)
 * [进程](#进程)
+* [线程](#线程)
 * [模块](#模块)
     * [添加新模块](#添加新模块)
     * [核心模块](#核心模块)
@@ -338,6 +340,42 @@ for (i = 0; i < rc.named_captures; i++, p += size) {
 ```
 
 ngx_regex_exec_array()函数接受ngx_regex_elt_t元素的数组（其实就是多个编译好的正则表达式以及对应的名字），一个待匹配字符串以及一个log。该函数会对待匹配字符串逐一应用数组中的正则表达式，直到匹配成功或者无一匹配。存在成功的匹配则返回NGX_OK，否则返回NGX_DECLINED，出错返回NGX_ERROR。
+
+Time
+====
+
+结构体 ngx_time_t 将GMT格式的时间表示分割成秒和毫秒：
+
+```
+typedef struct {
+    time_t      sec;
+    ngx_uint_t  msec;
+    ngx_int_t   gmtoff;
+} ngx_time_t;
+```
+
+ngx_tm_t 是 struct tm 的一个别名，用在 UNIX 平台和Windows上的SYSTEMTIME。
+
+为了获取当前时间，通常只需要访问一个可用的全局变量，表示所需格式的缓存时间值。ngx_current_msec 变量保存着自Epoch以来的毫秒数，并截成ngx_msec_t。
+
+以下是可用的字符串表示：
+
+* ngx_cached_err_log_time — 用在 error log: "1970/09/28 12:00:00"
+* ngx_cached_http_log_time — 用在 HTTP access log: "28/Sep/1970:12:00:00 +0600"
+* ngx_cached_syslog_time — 用在 syslog: "Sep 28 12:00:00"
+* ngx_cached_http_time — 用在 HTTP headers: "Mon, 28 Sep 1970 06:00:00 GMT"
+* ngx_cached_http_log_iso8601 — ISO 8601 标准格式: "1970-09-28T12:00:00+06:00"
+
+宏 ngx_time() 和 ngx_timeofday() 返回当前时间的秒，是访问缓存时间值的首选方式。
+
+为了明确获取时间，可以使用ngx_gettimeofday()，它会更新参数（指向struct timeval）。当nginx从系统调用回到事件循环体时，时间总是会更新。如果想立即更新时间，调用 ngx_time_update() 或 ngx_time_sigsafe_up date() （如果在信号处理上下文需要用到）。
+
+以下函数将 time_t 转换成可分解的时间表示形式，对于libc前缀的那些，可以使用 ngx_tm_t 或者 struct tm。
+
+* ngx_gmtime(), ngx_libc_gmtime() — 结果时间是 UTC
+* ngx_localtime(), ngx_libc_localtime() — 结果时间是相对时区
+
+ngx_http_time(buf, time) 返回用于适合 HTTP headers（比如 "Mon, 28 Sep 1970 06:00:00 GMT"）的字符串表示。另一种可能转变通过 ngx_http_cookie_time(buf, time) 提供，用于生成适合HTTP cookies ("Thu, 3 1-Dec-37 23:55:55 GMT") 的格式。
 
 容器
 ====
@@ -1202,6 +1240,108 @@ nginx有好几种进程类型。当前进程的类型保存在ngx_process这个�
 虽然nginx工作进程可以接受和处理POSIX信号，但是主进程却不通过调用标准kill()给工作进程和help进程发送信号。nginx通过内部进程间通道发送消息。即使这样，目前nginx也只是从主进程给工作进程发送消息。这些消息携带同样的信号。这些通过是socketpairs，其对端在不同的进程。
 
 当运行可执行程序，可以通过-s参数指定几种值。分别是 stop, quit, reopen, reload。它们被转化成信号 NGX_TERMINATE_SIGNAL, NGX_SHUTDOWN_SIGNAL, NGX_REOPEN_SIGNAL 和 NGX_RECONFIGURE_SIGNAL 并且被发送给nginx主进程，通过从nginx pid文件获取进程id。
+
+线程
+====
+
+可以将可能阻塞nginx工作进程的任务移到一个独立的线程。举例，nginx可以配置成使用线程来执行文件I/O操作。另一个例子是使用不具有异步接口的库，不能按通常方式用于nginx。请记住，线程接口是现有异步处理客户端连接的一种补充，而不是一种替代。
+
+为了处理异步，可以使用以下原生pthread的封装：
+
+```
+typedef pthread_mutex_t  ngx_thread_mutex_t;
+
+ngx_int_t ngx_thread_mutex_create(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_destroy(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_lock(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+ngx_int_t ngx_thread_mutex_unlock(ngx_thread_mutex_t *mtx, ngx_log_t *log);
+
+typedef pthread_cond_t  ngx_thread_cond_t;
+
+ngx_int_t ngx_thread_cond_create(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_destroy(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_signal(ngx_thread_cond_t *cond, ngx_log_t *log);
+ngx_int_t ngx_thread_cond_wait(ngx_thread_cond_t *cond, ngx_thread_mutex_t *mtx,
+    ngx_log_t *log);
+```
+
+nginx实现了线程池策略，而不是为每个任务创建一个线程。可以配置多个线程池用于不同的目的（举例，在不同的碰盘组上执行I/O）。每个线程池在启动时创建，并且包含一定数目的线程用来处理一个任务队列。当任务完成时，预定的handler就会被调用。
+imited number of threads that process a queue of tasks. When a task is completed, a predefined completion handler is called.
+
+头文件 src/core/ngx_thread_pool.h 包含了对应的定义：
+
+```
+struct ngx_thread_task_s {
+    ngx_thread_task_t   *next;
+    ngx_uint_t           id;
+    void                *ctx;
+    void               (*handler)(void *data, ngx_log_t *log);
+    ngx_event_t          event;
+};
+
+typedef struct ngx_thread_pool_s  ngx_thread_pool_t;
+
+ngx_thread_pool_t *ngx_thread_pool_add(ngx_conf_t *cf, ngx_str_t *name);
+ngx_thread_pool_t *ngx_thread_pool_get(ngx_cycle_t *cycle, ngx_str_t *name);
+
+ngx_thread_task_t *ngx_thread_task_alloc(ngx_pool_t *pool, size_t size);
+ngx_int_t ngx_thread_task_post(ngx_thread_pool_t *tp, ngx_thread_task_t *task);
+```
+
+在配置阶段，一个模块通过调用ngx_thread_pool_add(cf, name)获取线程池引用，以便使用线程。这个函数要么创建新的线程池，要么返回name对应存在的创建池引用。
+
+在运行阶段，用ngx_thread_task_post(tp, task)函数将任务添加进tp线程池的队列。结构体ngx_thread_task_t包含了所有信息，用来执行线程里的用户函数，传递参数和建立完成时的处理handler。
+
+```
+typedef struct {
+    int    foo;
+} my_thread_ctx_t;
+
+
+static void
+my_thread_func(void *data, ngx_log_t *log)
+{
+    my_thread_ctx_t *ctx = data;
+
+    /* this function is executed in a separate thread */
+}
+
+
+static void
+my_thread_completion(ngx_event_t *ev)
+{
+    my_thread_ctx_t *ctx = ev->data;
+
+    /* executed in nginx event loop */
+}
+
+
+ngx_int_t
+my_task_offload(my_conf_t *conf)
+{
+    my_thread_ctx_t    *ctx;
+    ngx_thread_task_t  *task;
+
+    task = ngx_thread_task_alloc(conf->pool, sizeof(my_thread_ctx_t));
+    if (task == NULL) {
+        return NGX_ERROR;
+    }
+
+    ctx = task->ctx;
+
+    ctx->foo = 42;
+
+    task->handler = my_thread_func;
+    task->event.handler = my_thread_completion;
+    task->event.data = ctx;
+
+    if (ngx_thread_task_post(conf->thread_pool, task) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+```
 
 模块
 =======
