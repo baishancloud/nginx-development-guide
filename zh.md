@@ -341,7 +341,7 @@ for (i = 0; i < rc.named_captures; i++, p += size) {
 
 ngx_regex_exec_array()函数接受ngx_regex_elt_t元素的数组（其实就是多个编译好的正则表达式以及对应的名字），一个待匹配字符串以及一个log。该函数会对待匹配字符串逐一应用数组中的正则表达式，直到匹配成功或者无一匹配。存在成功的匹配则返回NGX_OK，否则返回NGX_DECLINED，出错返回NGX_ERROR。
 
-Time
+时间
 ====
 
 结构体 ngx_time_t 将GMT格式的时间表示分割成秒和毫秒：
