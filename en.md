@@ -109,7 +109,7 @@ Integers
 For general purpose, nginx code uses the following two integer types ngx_int_t and ngx_uint_t which are typedefs for intptr_t and uintptr_t.
 
 Common return codes
--------------------
+--------------------
 Most functions in nginx return the following codes:
 
 * NGX_OK — operation succeeded
