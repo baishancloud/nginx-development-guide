@@ -2924,9 +2924,9 @@ typedef struct {
 如果init_upstream在配置阶段没有初始化，ngx_http_upstream_module会将其默认设置成ngx_http_upstream_init_round_robin。
 
    * init_upstream(cf, us) — 配置阶段方法，用于初始化一组服务器并初始化init()方法。一个典型的负载均衡模块使用upstream块中的一组服务器来创建某种有效的数据结构并在data成员中存放自身的配置。
-   * init(r, us) — 初始化用于每个请求的ngx_http_upstream_peer_t.peer (不要和之前用于每个upstream的ngx_http_upstream_srv_conf_t.peer搞混了)结构，该结构用于进行负载均衡。该结构会作为所有处理服务器选择的回调函数的data参数传递。
+   * init(r, us) — 初始化用于每个请求的ngx_http_upstream_t.peer (不要和之前用于每个upstream的ngx_http_upstream_srv_conf_t.peer搞混了)结构，该结构用于进行负载均衡。该结构会作为所有处理服务器选择的回调函数的data参数传递。
 
-当nginx需要将请求转给其他服务器进行处理时，它会调用配置好的负载均衡算法来选择一个地址，并发起连接。选择算法是从ngx_http_upstream_peer_t.peer对象中获取的，该对象的类型是ngx_peer_connection_t：
+当nginx需要将请求转给其他服务器进行处理时，它会调用配置好的负载均衡算法来选择一个地址，并发起连接。选择算法是从ngx_http_upstream_t.peer对象中获取的，该对象的类型是ngx_peer_connection_t：
 
 ```
 struct ngx_peer_connection_s {
