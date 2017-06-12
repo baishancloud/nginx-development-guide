@@ -569,7 +569,7 @@ typedef struct {
 } my_node_t;
 ```
 
-为了处理整个树，需要两个节点：root 和 sentinel。通常他们被添加到某些自定义的结构中，这样就能将数据组织到树中，其中包含指向数据的边接。
+为了处理整个树，需要两个节点：root 和 sentinel。通常他们被添加到某些自定义的结构中，这样就能将数据组织到树中，其叶子节点中包含指向数据的指针。
 
 初始化树：
 
@@ -579,7 +579,7 @@ my_tree_t  root;
 ngx_rbtree_init(&root.rbtree, &root.sentinel, insert_value_function);
 ```
 
-The insert_value_function is a function that is responsible for traversing the tree and inserting new values into correct place. For example, the ngx_str_rbtree_insert_value functions is designed to deal with ngx_str_t type.
+inster_value_function是负责遍历红黑树并将新值插入到正确位置的函数。例如，ngx_str_rbtree_insert_value函数用来处理ngx_str_t类型。
 
 ```
 void ngx_str_rbtree_insert_value(ngx_rbtree_node_t *temp,
@@ -647,7 +647,7 @@ compare() 是一个返回较小，相等或较大的经典函数。为了更快�
     ngx_rbtree_insert(&root->rbtree, node);
 ```
 
-to remove a node:
+删除一个节点：
 
 ```
 ngx_rbtree_delete(&root->rbtree, node);
