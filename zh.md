@@ -859,7 +859,7 @@ nginx用共享内存在进程之间共享公共的数据。函数 ngx_shared_mem
 
 * init — 初始化回调函数，在实际的共享内存映射后调用。
 * data — data 上下文，传递给初始化回调函数。
-* noreuse — 村记。禁止复用从旧的cycle里的共享内存。
+* noreuse — 标记。禁止复用从旧的cycle里的共享内存。
 * tag — 共享内存tag。
 * shm — 类型为 ngx_shm_t 的特定平台对象，有以下几个字段：
     * addr — 映射的共享内存地址，初始为NULL
@@ -870,7 +870,7 @@ nginx用共享内存在进程之间共享公共的数据。函数 ngx_shared_mem
 
 共享内存zone实体会在ngx_init_cycle()解析配置后在映射到实际的内存。对POSIX系统，mmap() 系统调用用来创建匿名共享映射。对Windows，使用CreateFileMapping()/MapViewOfFileEx()对。
 
-nginx提供了 ngx_slab_pool_t 来分配共享内存。对每个zone，slab pool会自动创建用来分配内存。这个池在共享zone的开头，并且通过表达式 (ngx_slab_pool_t *) shm_zone->shm.addr 访问。共享内存的分配通过调用 ngx_slab_alloc(pool, size)/ngx_slab_c alloc(pool, size) 函数完成，内存通过调用 ngx_slab_free(pool, p) 释放。
+nginx提供了 ngx_slab_pool_t 来分配共享内存。对每个zone，slab pool会自动创建用来分配内存。这个池在共享zone的开头，并且通过表达式 (ngx_slab_pool_t *) shm_zone->shm.addr 访问。共享内存的分配通过调用 ngx_slab_alloc(pool, size)/ngx_slab_calloc(pool, size) 函数完成，内存通过调用 ngx_slab_free(pool, p) 释放。
 
 slab pool 将共享zone分成多个页。每个页被用于分配同样大小的对象。大小推荐为2的次方，并且不小于8。其它值被四舍五入。对每个页，bitmask被用来表示哪些块是已经使用的和哪些是空闲的。对大小超过半页（通常是2048字节），将按完整的页大小分配。
 
@@ -1042,7 +1042,7 @@ ngx_buf_t 结构体有以下字段：
 * file — file对象。
 * temporary — 临时标记。意味着这个buffer指向可写的内存。
 * memory — 内存标记。表示这个buffer指向只读的内存。
-* in_file — 文件村记。表示该当前buffer指向文件的数据。
+* in_file — 文件标记。表示该当前buffer指向文件的数据。
 * flush — 清空标记。表示应该清空这个buffer之前的所有数据。
 * recycled — 可回收标记。表示该buffer可以被回收，而且应该尽快的使用。
 * sync — 同步标记。表示这个buffer不带任何数据或特殊的像flush, last_buf这样的。一般这样的buffer在nginx里会被认为是错误的，这个标记允许略过错误检查。
@@ -1126,7 +1126,7 @@ ngx_get_my_chain(ngx_pool_t *pool)
 * local_sockaddr, local_socklen — 本地二进制形式地址。初始时这些为空，通过函数 ngx_connection_local_sockaddr() 得到本地socket地址。
 * proxy_protocol_addr, proxy_protocol_port - PROXY protocol 客户端地址和端口，如果为连接开启了 PROXY protocol。
 * ssl — nginx 连接 SSL 上下文
-* reusable — 可复用村记。
+* reusable — 可复用标记。
 * close — 关闭标记。表示连接是可复用的，并且应该被关闭。
 
 nginx connection可以透传SSL层。这种情况下connection ssl字段指向一个ngx_ssl_connection_t结构体，保留着这个连接的SSL相关的数据，包括 SSL_CTX 和 SSL。处理函数 recv, send, recv_chain, send_chain 被设置成对应的SSL函数。
