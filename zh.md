@@ -656,7 +656,7 @@ ngx_rbtree_delete(&root->rbtree, node);
 哈希
 ----
 
-唏希表定义在 src/core/ngx_hash.h，支持精确和通配符匹配。后者需要额外的处理，放在下面的章节专门描述。
+哈希表定义在 src/core/ngx_hash.h，支持精确和通配符匹配。后者需要额外的处理，放在下面的章节专门描述。
 
 初始化哈希时，我们需要提前知道元素的个数，以便nginx能更好的优化哈希表。max_size 和 bucket_size 这两参数需要配置。细节详见官方提供的文档。通常这两参数会做成用户可配置的。哈希初始化的设置放在ngx_hash_init_t类型的存储中。而哈希表本身的类型是 ngx_hash_t。
 
