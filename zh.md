@@ -800,7 +800,7 @@ nginx提供以下的函数用于从系统堆分配内存：
 
 nginx 内存池类型为 ngx_pool_t。支持以下操作：
 
-* ngx_create_pool(size, log) — 根据块大小创建内存池。返回pool对象也是在里面内存池里创建的。
+* ngx_create_pool(size, log) — 根据块大小创建内存池。返回pool对象也是在里面内存池里创建的。size 至少大于NGX_MIN_POOL_SIZE，且为NGX_POOL_ALIGNMENT的倍数。
 * ngx_destroy_pool(pool) — 销毁整个内存池，包括pool对象自己。
 * ngx_palloc(pool, size) — 从内存池分配对齐的内存。
 * ngx_pcalloc(pool, size) — 从内存池分配对齐的内存并且置为0。
