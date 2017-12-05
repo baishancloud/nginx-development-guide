@@ -791,7 +791,7 @@ A pool internally allocates objects in continuous blocks of memory. Once a block
 
 Nginx pool has the type ngx_pool_t. The following operations are supported:
 
-* ngx_create_pool(size, log) — create a pool with given block size. The pool object returned is allocated in the pool as well.
+* ngx_create_pool(size, log) — create a pool with given block size. The pool object returned is allocated in the pool as well. The size should be at least NGX_MIN_POOL_SIZE and a multiple of NGX_POOL_ALIGNMENT.
 * ngx_destroy_pool(pool) — free all pool memory, including the pool object itself.
 * ngx_palloc(pool, size) — allocate aligned memory from pool
 * ngx_pcalloc(pool, size) — allocated aligned memory from pool and fill it with zeroes
