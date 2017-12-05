@@ -58,7 +58,7 @@ NGINX开发指南
     * [构建过滤模块](#构建过滤模块)
     * [缓冲复用](#缓冲复用)
     * [负载均衡](#负载均衡)
-    
+
 译者序
 =====
 
@@ -569,7 +569,7 @@ typedef struct {
 } my_node_t;
 ```
 
-为了处理整个树，需要两个节点：root 和 sentinel。通常他们被添加到某些自定义的结构中，这样就能将数据组织到树中，其中包含指向数据的边接。
+为了处理整个树，需要两个节点：root 和 sentinel。通常他们被添加到某些自定义的结构中，这样就能将数据组织到树中，其叶子节点中包含指向数据的指针。
 
 初始化树：
 
@@ -579,7 +579,7 @@ my_tree_t  root;
 ngx_rbtree_init(&root.rbtree, &root.sentinel, insert_value_function);
 ```
 
-The insert_value_function is a function that is responsible for traversing the tree and inserting new values into correct place. For example, the ngx_str_rbtree_insert_value functions is designed to deal with ngx_str_t type.
+inster_value_function是负责遍历红黑树并将新值插入到正确位置的函数。例如，ngx_str_rbtree_insert_value函数用来处理ngx_str_t类型。
 
 ```
 void ngx_str_rbtree_insert_value(ngx_rbtree_node_t *temp,
@@ -647,7 +647,7 @@ compare() 是一个返回较小，相等或较大的经典函数。为了更快�
     ngx_rbtree_insert(&root->rbtree, node);
 ```
 
-to remove a node:
+删除一个节点：
 
 ```
 ngx_rbtree_delete(&root->rbtree, node);
@@ -1156,7 +1156,7 @@ nginx connection可以透传SSL层。这种情况下connection ssl字段指向�
 * timer_set — 定时器设置标记。意味着这个事件定时器被设置，但还未过期。
 * timedout — 超时标记。意味着这个事件已经过期。
 * eof — 读结束标记。表示读结束。
-* pending_eof — 结束挂起标记。表示结束是在socket上挂起的，虽然可能还有一些数据可用。这个标记通过 epoll EPOLLRDHUP 事件 or kqueue EV_EOF 标记传递。
+* pending_eof — 结束挂起标记。表示结束是在socket上挂起的，虽然可能还有一些数据可用。这个标记通过 epoll EPOLLRDHUP 事件或者kqueue EV_EOF 标记传递。
 * error — 错误标记。意思当读或写时发生了错误。
 * cancelable — 可取消标记。表示当nginx工作进程退出时，即使该事件没过期也能被立即调用。它提供了一种方式用来完成特定动作，比如清空日志文件。
 * posted — 队列加入标记。意味这个事件已经加入了队列。
@@ -1165,17 +1165,17 @@ nginx connection可以透传SSL层。这种情况下connection ssl字段指向�
 I/O事件
 -------
 
-每个通过调用ngx_get_connection()的 connection 有两个事件：c->read 和 c->write。这两事件用于接受可读写socket的通知。所有的这些事件都是边缘触发模式，意味着只有socket的状态变化时它们才会触发。举个例子，假设只读了部份数据，当有更多的数据到达时，nginx不会重新发读通知。即使底层的I/O通知机制本质上是水平触发的（poll, select等等），nginx将会把它们转成边缘触发。为了将不同平台的事件通知机制统一起来，当处理I/O socket通知或任何I/O操作后，必须调用ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) 这两函数。通常这两函数在读或写事件处理结束后调用一次。
+每个通过调用ngx_get_connection()获取的 connection 有两个事件：c->read 和 c->write。这两事件用于接受可读写socket的通知。所有的这些事件都是边缘触发模式，意味着只有socket的状态变化时它们才会触发。举个例子，假设只读了部份数据，当有更多的数据到达时，nginx不会重新发读通知。即使底层的I/O通知机制本质上是水平触发的（poll, select等等），nginx将会把它们转成边缘触发。为了将不同平台的事件通知机制统一起来，当处理I/O socket通知或任何I/O操作后，必须调用ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) 这两函数。通常这两函数在读或写事件处理结束后调用一次。
 
 定时器事件
 ----------
 
 事件可以被设置以通知超时过期。ngx_add_timer(ev, timer) 函数设置事件的超时时间，ngx_del_timer(ev) 删除前面设置的超时。当前为所有事件设置的超时都存放在一个全局的超时红黑树 ngx_event_timer_rbtree。这个树key的类型是 ngx_msec_t，值是从1970年1月1日算起的过期时间。这个树结构提供了快速的插入和删除，以及访问那些最小的超时。后者被nginx用于查找等待I/O事件的时间以及之后的过期事件。
 
-已加事件
+延迟事件
 -------------
 
-添加事件意味着它的handler会在某个时间点的事件遍历时调用。加入事件对简化代码和防止栈溢出是一个好的实践。加入的事件放在一个队列里。宏 ngx_post_event(ev, q) 加入事件到 post queue，ngx_delete_posted_event(ev) 从它所加入的队列中删除事件。通常事件加到 ngx_posted_events 这个队 列。 这个事件在稍后事件遍历中被事件(在所有的I/O和定时器事件已经处理后)。 ngx_event_process_posted() 函数用来处理事件队列。这个函数一直处理到列队为空，这意味着在当前的事件遍历过程中可以加更多的事件。
+延迟事件意味着它的handler会在稍后的事件遍历中被调用。延迟事件对简化代码和防止栈溢出是一个好的方法。延迟的事件放在一个队列里。宏 ngx_post_event(ev, q) 加入事件到延迟队列，ngx_delete_posted_event(ev) 从它所加入的队列中删除事件。通常事件加到 ngx_posted_events 这个队列。 这个队列在稍后的事件遍历中被处理(在所有的I/O和定时器事件已经处理后)。 ngx_event_process_posted() 函数用来处理事件队列。这个函数一直处理到列队为空，这意味着在当前的事件遍历过程中可以加更多的事件。
 
 例子：
 
@@ -1228,11 +1228,11 @@ ngx_my_read_handler(ngx_event_t *rev)
 所有做I/O处理的nginx进程都有一个事件遍历。唯一没有I/O的进程是master进程，因为它花大部份时间在sigsuspend()上面，以等待信号的到达。事件遍历由 ngx_process_events_and_timers 函数实现。只要进程存在，这个函数就会一直重复的调用。它有以下几个阶段：
 
 * 找出通过调用 ngx_event_find_timer() 的最小超时时间。该函数找到最左边的定时器树节点，并且返回该节点的到期毫秒数。
-* 处理I/O事件。通过nginx配置选出对应的事件通知机制，然后处理。这个handler会一直待待至有I/O事件发生，或者最小的超时时间。对每个发生的读写事件，它的ready标记会被设置，它的handler会被调用。对Linux而言，通常会使用 ngx_epoll_process_events() 来调用 epoll_wait() 以等待I/O发生。
-* 通过调用 ngx_event_expire_timers() 处理过期事件。这个定时器树会从最左侧的节点向右历遍，直到找到没有过期到期的超时。对每个超时的节点，timedout 标记会被设置，timer_set 会被重量置，并且事件handler会被调用。
-* 通过调用 ngx_event_process_posted() 处理已加事件。这个函数一直重复删除和处理队列里的第一个无素，直到队列为空。
+* 处理I/O事件。通过nginx配置选出对应的事件通知机制，然后处理。这个handler会一直等待至有I/O事件发生，或者最小的超时时间。对每个发生的读写事件，它的ready标记会被设置，它的handler会被调用。对Linux而言，通常会使用 ngx_epoll_process_events() 来调用 epoll_wait() 以等待I/O发生。
+* 通过调用 ngx_event_expire_timers() 处理过期事件。这个定时器树会从最左侧的节点向右历遍，直到找到没有过期到期的超时。对每个超时的节点，timedout 标记会被设置，timer_set 会被重置，并且事件handler会被调用。
+* 通过调用 ngx_event_process_posted() 处理延迟事件。这个函数一直重复删除和处理队列里的第一个元素，直到队列为空。
 
-所有这些nginx进程也处理信号。信号handler只是设置了在 ngx_process_events_and_timers() 调用之后的全局变量。
+所有这些nginx进程也处理信号。信号handler只是设置了在 ngx_process_events_and_timers() 调用之后会被检查的全局变量。
 
 进程
 =========
@@ -1261,7 +1261,7 @@ nginx有好几种进程类型。当前进程的类型保存在ngx_process这个�
 
 * NGX_CHANGEBIN_SIGNAL (SIGUSR2) — 更新可执行程序。主进程启动新的可执行程序，将所有的监听文件描述符传给它。这些列表是通过环境变量“NGINX” 传递的，描述符值以分号分隔。新的nginx实例读这个变量然后将socket描述符添加到自己的初始cycle。其它进程忽略这种信号。
 
-虽然nginx工作进程可以接受和处理POSIX信号，但是主进程却不通过调用标准kill()给工作进程和help进程发送信号。nginx通过内部进程间通道发送消息。即使这样，目前nginx也只是从主进程给工作进程发送消息。这些消息携带同样的信号。这些通过是socketpairs，其对端在不同的进程。
+虽然nginx工作进程可以接受和处理POSIX信号，但是主进程却不通过调用标准kill()给工作进程和help进程发送信号。所有nginx进程都可以通过进程间通道发送消息。但是，目前nginx只是从主进程给工作进程发送消息。这些消息携带同样的信号。这些通过是socketpairs，其对端在不同的进程。
 
 当运行可执行程序，可以通过-s参数指定几种值。分别是 stop, quit, reopen, reload。它们被转化成信号 NGX_TERMINATE_SIGNAL, NGX_SHUTDOWN_SIGNAL, NGX_REOPEN_SIGNAL 和 NGX_RECONFIGURE_SIGNAL 并且被发送给nginx主进程，通过从nginx pid文件获取进程id。
 
@@ -1289,7 +1289,7 @@ ngx_int_t ngx_thread_cond_wait(ngx_thread_cond_t *cond, ngx_thread_mutex_t *mtx,
     ngx_log_t *log);
 ```
 
-nginx实现了线程池策略，而不是为每个任务创建一个线程。可以配置多个线程池用于不同的目的（举例，在不同的碰盘组上执行I/O）。每个线程池在启动时创建，并且包含一定数目的线程用来处理一个任务队列。当任务完成时，预定的handler就会被调用。
+nginx实现了线程池策略，而不是为每个任务创建一个线程。可以配置多个线程池用于不同的目的（举例，在不同的磁盘组上执行I/O）。每个线程池在启动时创建，并且包含一定数目的线程用来处理一个任务队列。当任务完成时，预定的handler就会被调用。
 
 头文件 src/core/ngx_thread_pool.h 包含了对应的定义：
 
@@ -1392,11 +1392,12 @@ ngx_addon_name=$ngx_module_name
 * ngx_module_deps — 模块依赖头文件列表。
 * ngx_module_libs — 模块用到的链接库列表。 举个例子，libpthread 可以这样被链接 ngx_module_libs=-lpthread。这些宏可以直接在nginx里使用： LIBXSLT, LIBGD, GEOIP, PCRE, OPENSSL, MD5, SHA1, ZLIB, and PERL
 * ngx_module_link — 模块链接形式，DYNAMIC表示动态模块，ADDON表示静态模块，其它根据不同的值会执行不同的操作。
-* ngx_module_order — 模块顺序，设置模块的加载顺序在 HTTP_FILTER 和 HTTP_AUX_FILTER 类型的模块中是很有用的。模块按反序加载。
-  在列表底部附近的 ngx_http_copy_filter_module 是最先被执行的。它读数据给其它的filter使用。在列表头部附近的ngx_http_write_filter_module 输出数据，并且是最后执行的。
+* ngx_module_order — 模块顺序，设置模块的加载顺序在 HTTP_FILTER 和 HTTP_AUX_FILTER 类型的模块中是很有用的。模块按反序加载
+
+  在列表底部附近的 ngx_http_copy_filter_module 是最先被执行的。它读数据给其它的filter使用。在列表头部附近的ngx_http_write_filter_module 输出数据，并且是最后执行的。
 
   选项格式是这样的：当前模块名称紧接着用空格分隔的模块列表，这些列表位置靠前，但执行是靠后。这个模块将被插入在这个列表最后一个模块的前面。
-  
+
   对filter模块默认是“ngx_http_copy_filter”，这样该模块被插入在copy filter之前，执行也就是copy filter的后面。对其它类型模块默认值为空。
 
 模块通过使用 --add-module=/path/to/module 表示静态编译，--add-dynamic-module=/path/to/module 表示动态编译。
@@ -1432,7 +1433,7 @@ struct ngx_module_s {
 
 省略私有部分包含模块版本，签名和预定义的宏 NGX_MODULE_V1。
 
-每个模块包含有私有数据的上下文，特定的配置指令，命令数组，还有可能在特写被调用的函数钩子。模块的生命周期由下面这些组成：
+每个模块将私有数据保存在ctx字段中，根据commands数组中的指令集合解析配置文件中的指令，还有可能在nginx生命周期中的某个阶段调用模块设置的回调函数。模块的生命周期由下面这些组成：
 
 * 配置指令处理函数在master进程解析配置文件时被调用。
 * init_module 在master进程成功解析配置后调用。
@@ -1594,7 +1595,7 @@ struct ngx_command_s {
 
 指令类型：
 
-* NGX_CONF_BLOCK — 表示是一个块，比如它可能用 { } 包含其它指令，或自己实现的解析以处理包含的内容，比如 map 指领。
+* NGX_CONF_BLOCK — 表示是一个块，比如它可能用 { } 包含其它指令，或自己实现的解析以处理包含的内容，比如 map 指令。
 * NGX_CONF_FLAG — 表示是个boolean的标记，“on” 或者 “off”。
 
 指令的上下文定义了配置的位置，并且关联到对应的存储配置的地方。
@@ -1634,7 +1635,7 @@ set字段定义了解析配置时调用的handler，并且将解析的值存放�
 * set_path_slot — 转化参数为 ngx_path_t 类型并且做必须的初始化。详情请看 proxy_temp_path 指令
 * set_access_slot — 转化参数为文件权限mask。详情请看 proxy_store_access 指令。
 
-conf字段定义了哪个上下文用来存储指令的值，或者用NULL表示不使用上下文。简单的核心模块不用配置上下文并且设置 NGX_DIRECT_CONF 标识。 在真实场景里，像http或stream的模块往往更复杂，配置可以在pre-server或者pre-location里，还有甚至是在 "if" 里的。这样的模块里，配置结构会更复杂，请到一些模块里看他们是如何管理各自的配置的。
+conf字段定义了用来存储指令的上下文，或者用NULL表示不使用上下文。简单的核心模块不用配置上下文并且设置 NGX_DIRECT_CONF 标识。 在真实场景里，像http或stream的模块往往更复杂，配置可以在pre-server或者pre-location里，还有甚至是在 "if" 里的。这样的模块里，配置结构会更复杂，请到一些模块里看他们是如何管理各自的配置的。
 
 * NGX_HTTP_MAIN_CONF_OFFSET — http 块配置
 * NGX_HTTP_SRV_CONF_OFFSET — http 块配置
@@ -1669,7 +1670,7 @@ HTTP
 * ngx_http_wait_request_handler() 是读事件handler，当客户端socket有数据可读时被调用。在这个阶段会创建 HTTP request 对象 ngx_http_request_t 并且设置到 connection 的 data 字段。
 * ngx_http_process_request_line() 是读事件handler，用来读请求行。这个 handler 在 ngx_http_wait_request_handler() 里设置。数据被读进 connection 的 buffer。 buffer的大小初始值是指令 client_header_buffer_size。整个 client header 应该是适合这个buffer的。如果这个初始值不够时，会分配一个更大的buffer，它的大小为指令large_client_header_buffers的值。
 * ngx_http_process_request_headers() 是读事件handler，在 ngx_http_process_request_line() 之后设置，被用来读请求头。
-* ngx_http_core_run_phases() 当整个http请求头读完和解析后调用。这个函数运行从 NGX_HTTP_POST_READ_PHASE 到 NGX_HTTP_CONTENT_PHASE 的请求阶段。最后阶段产生响应内容并传给整个filter链。响应不一定要在这阶段发给客户端。它可能缓冲起来然后在最后阶段发送。
+* ngx_http_core_run_phases() 当整个http请求头读完和解析后调用。这个函数运行从 NGX_HTTP_POST_READ_PHASE 到 NGX_HTTP_CONTENT_PHASE 的请求阶段。最后阶段产生响应内容并传给整个filter链。响应不一定要在这阶段发给客户端。它可能缓存起来然后在最后阶段发送。
 * ngx_http_finalize_request() 通常在请求已经产生了所有的输出或发生错误时调用。后者会查找合适的错误页面作为响应。如果响应没有完全的发送给客户端，HTTP写处理 ngx_http_writer() 会被激活以完成数据的发送。
 * ngx_http_finalize_connection() 在响应完全发送给客户端后调用，然后销毁请求。如果客户端连接的keepalive功能启用了，ngx_http_set_keepalive() 会被调用，用来销毁当前请求并等待这个连接的下一个请求。否则，调用 ngx_http_close_request() 同时销毁请求和连接。
 
@@ -1698,10 +1699,10 @@ HTTP
 * http_protocol, http_version, http_major, http_minor - 客户端HTTP协议和版本的文本形式 (“HTTP/1.0”, “HTTP/1.1” 等)，数字形式 (NGX_HTTP_VERSION_10, NGX_HTTP_VERSION_11 等) 和主次版本号
 * request_line, unparsed_uri — 客户端原始的请求行和URI。
 * uri, args, exten — 当前请求的请求URI, 参数和文件扩展名。URI值可能由于规范跟客户端发送过来的原始URI不同。经过请求处理，这些值可能在内部重定向时发生改变。
-* main — 指向主请求对象。创建这个创建用来处理HTTP请求，而那些子请求被创建用来执行主请求里的特定子任务。
+* main — 指向主请求对象。创建这个对象用来处理HTTP请求，而那些子请求被创建用来执行主请求里的特定子任务。
 * parent — 子请求指向的父请求。
 * postponed — 依次要发送和创建的buffer和子请求列表。这个列表被用在 postpone filter 以提供连续的请求输出，它的各部份由子请求创建。
-* post_subrequest — 不用于主请求。指向子请求完成会调用的具有上下文的handler。不用于主请求。
+* post_subrequest — 指向子请求完成会调用的具有上下文的handler。不用于主请求。
 * posted_requests — 开始要执行或恢复的请求列表。通过调用请求的write_event_handler完成启动或恢复。通常这个handler会保留请求主函数，第一个运行请求阶段并且产生输出的。
 
     一个请求经常通过调用 ngx_http_post_request(r, NULL)加到posted_requests。这样会加到主请求的 posted_requests 列表里。函数会 ngx_http_run_posted_requests(c) 会运行所有的请求，这些添加在通过连接激活请求对应的主请求。这个函数应该在所有的事件处理中调用，这样能产生新的添加请求。通常在执行了请求的读写处理后调用。
@@ -2181,8 +2182,6 @@ ngx_http_foo_redirect(ngx_http_request_t *r)
     return ngx_http_internal_redirect(r, &uri, &args);
 }
 ```
-
-The function ngx_http_named_location(r, name) redirects a request to a named location. The name of the location is passed as the argument. The location is looked up among all named locations of the current server, after which the requests switches to the NGX_HTTP_REWRITE_PHASE phase.
 
 ngx_http_named_location(r, name)函数将请求重定向到一个命名location。目标location的名称通过参数传递，并在当前server中的全部命名location中查找，接着请求会被发送到NGX_HTTP_REWRITE_PHASE阶段。
 
@@ -2923,8 +2922,10 @@ typedef struct {
 实现负载均衡算法的模块必须设置这些方法并初始化私有数据。
 如果init_upstream在配置阶段没有初始化，ngx_http_upstream_module会将其默认设置成ngx_http_upstream_init_round_robin。
 
-   * init_upstream(cf, us) — 配置阶段方法，用于初始化一组服务器并初始化init()方法。一个典型的负载均衡模块使用upstream块中的一组服务器来创建某种有效的数据结构并在data成员中存放自身的配置。
-   * init(r, us) — 初始化用于每个请求的ngx_http_upstream_t.peer (不要和之前用于每个upstream的ngx_http_upstream_srv_conf_t.peer搞混了)结构，该结构用于进行负载均衡。该结构会作为所有处理服务器选择的回调函数的data参数传递。
+* init_upstream(cf, us) — 配置阶段方法，用于初始化一组服务器并初始化init()方法。一个典型的负载均衡模块使用upstream块中的一组服务器来创建某种有效的数据结构并在data成员中存放自身的配置。
+
+
+* init(r, us) — 初始化用于每个请求的ngx_http_upstream_t.peer (不要和之前用于每个upstream的ngx_http_upstream_srv_conf_t.peer搞混了)结构，该结构用于进行负载均衡。该结构会作为所有处理服务器选择的回调函数的data参数传递。
 
 当nginx需要将请求转给其他服务器进行处理时，它会调用配置好的负载均衡算法来选择一个地址，并发起连接。选择算法是从ngx_http_upstream_t.peer对象中获取的，该对象的类型是ngx_peer_connection_t：
 
