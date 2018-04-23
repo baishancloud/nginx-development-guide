@@ -58,6 +58,18 @@ NGINX开发指南
     * [构建过滤模块](#构建过滤模块)
     * [缓冲复用](#缓冲复用)
     * [负载均衡](#负载均衡)
+* [例子](#例子)
+* [代码风格](#代码风格)
+    * [一般规则](#一般规则)
+    * [文件](#文件)
+    * [注释](#注释)
+    * [预处理器](#预处理器)
+    * [类型](#类型)
+    * [变量](#变量)
+    * [函数](#函数)
+    * [表达式](#表达式)
+    * [条件和循环](#条件和循环)
+    * [标签](#标签)
 
 译者序
 =====
@@ -2971,3 +2983,525 @@ struct ngx_peer_connection_s {
 * notify(pc, data, type) — 开源版本中未使用。
 * set_session(pc, data)和save_session(pc, data) — SSL相关方法，用于缓存同upstream服务器间的SSL会话，由round-robin负载均衡算法实现。
 
+例子
+========
+
+仓库 [nginx-dev-examples](http://hg.nginx.org/nginx-dev-examples) 提供了nginx模块示例。
+
+代码风格
+==========
+
+一般规则
+------------------
+
+* 最大广本宽度为80个字符
+* 缩进是4个空格
+* 没有tabs，也没有尾空格
+* 同一行上的列表元素用空格分隔
+* 十六进制文字是小写字母
+* 文件名，函数，类型名和全局变量以ngx_或更详细的ngx_http_, ngx_mail_为前缀
+
+```
+size_t
+ngx_utf8_length(u_char *p, size_t n)
+{
+    u_char  c, *last;
+    size_t  len;
+
+    last = p + n;
+
+    for (len = 0; p < last; len++) {
+
+        c = *p;
+
+        if (c < 0x80) {
+            p++;
+            continue;
+        }
+
+        if (ngx_utf8_decode(&p, n) > 0x10ffff) {
+            /* invalid UTF-8 */
+            return n;
+        }
+    }
+
+    return len;
+}
+```
+
+文件
+------
+
+一个典型的源文件可能包含以下部分，并以两个空行分隔：
+
+* 版权声明
+* 包含(includes)
+* 预处理器声明
+* 类型声明
+* 函数原型
+* 变量声明
+* 函数声明
+
+版权声明如下所示：
+
+```
+/*
+ * Copyright (C) 作者名字
+ * Copyright (C) 组织，公司
+ */
+```
+
+如果文件有明显的修改，作者列表应该跟着更新，新的作者添加到上面。
+
+ngx_config.h and ngx_core.h 这两个文件总是会首先包含进来，紧跟着 ngx_http.h, ngx_stream.h, or ngx_mail.h。最后是可选的外部头文件：
+
+```
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxslt/xslt.h>
+
+#if (NGX_HAVE_EXSLT)
+#include <libexslt/exslt.h>
+#endif
+```
+
+头文件应该包含有所谓的“头保护”：
+
+```
+#ifndef _NGX_PROCESS_CYCLE_H_INCLUDED_
+#define _NGX_PROCESS_CYCLE_H_INCLUDED_
+...
+#endif /* _NGX_PROCESS_CYCLE_H_INCLUDED_ */
+```
+
+注释
+---------
+
+* 不使用 “//” 注释
+* 文本用英文，首选美国拼写
+* 多行注释用以下格式：
+
+```
+/*
+ * The red-black tree code is based on the algorithm described in
+ * the "Introduction to Algorithms" by Cormen, Leiserson and Rivest.
+ */
+/* find the server configuration for the address:port */
+```
+
+预处理器
+------------
+
+宏以ngx_或者NGX_为前缀。常量的宏用大写。参数和初始化的宏用小写。宏和值至少两个空格分开：
+
+```
+#define NGX_CONF_BUFFER  4096
+
+#define ngx_buf_in_memory(b)  (b->temporary || b->memory || b->mmap)
+
+#define ngx_buf_size(b)                                                      \
+    (ngx_buf_in_memory(b) ? (off_t) (b->last - b->pos):                      \
+                            (b->file_last - b->file_pos))
+
+#define ngx_null_string  { 0, NULL }
+```
+
+条件放在括号内，否定操作放在外面：
+
+```
+#if (NGX_HAVE_KQUEUE)
+...
+#elif ((NGX_HAVE_DEVPOLL && !(NGX_TEST_BUILD_DEVPOLL)) \
+       || (NGX_HAVE_EVENTPORT && !(NGX_TEST_BUILD_EVENTPORT)))
+...
+#elif (NGX_HAVE_EPOLL && !(NGX_TEST_BUILD_EPOLL))
+...
+#elif (NGX_HAVE_POLL)
+...
+#else /* select */
+...
+#endif /* NGX_HAVE_KQUEUE */
+
+类型
+------
+
+类型名以_t结尾。定义的类型以至少两个空格分隔：
+
+```
+typedef ngx_uint_t  ngx_rbtree_key_t;
+```
+
+结构体用typedef定义。内部成员的类型和名字保持对齐：
+
+```
+typedef struct {
+    size_t      len;
+    u_char     *data;
+} ngx_str_t;
+```
+
+保持文件中不同结构体的对齐一致。指向自身结构体的以_s结尾。相邻的两个结构定义用两个空行分开：
+
+```
+typedef struct ngx_list_part_s  ngx_list_part_t;
+
+struct ngx_list_part_s {
+    void             *elts;
+    ngx_uint_t        nelts;
+    ngx_list_part_t  *next;
+};
+
+
+typedef struct {
+    ngx_list_part_t  *last;
+    ngx_list_part_t   part;
+    size_t            size;
+    ngx_uint_t        nalloc;
+    ngx_pool_t       *pool;
+} ngx_list_t;
+```
+
+每个结构体成员都在自己的行中声明：
+
+```
+typedef struct {
+    ngx_uint_t        hash;
+    ngx_str_t         key;
+    ngx_str_t         value;
+    u_char           *lowcase_key;
+} ngx_table_elt_t;
+```
+
+结构体内的函数指针都有以 _pt 结尾的定义类型：
+
+```
+typedef ssize_t (*ngx_recv_pt)(ngx_connection_t *c, u_char *buf, size_t size);
+typedef ssize_t (*ngx_recv_chain_pt)(ngx_connection_t *c, ngx_chain_t *in,
+    off_t limit);
+typedef ssize_t (*ngx_send_pt)(ngx_connection_t *c, u_char *buf, size_t size);
+typedef ngx_chain_t *(*ngx_send_chain_pt)(ngx_connection_t *c, ngx_chain_t *in,
+    off_t limit);
+
+typedef struct {
+    ngx_recv_pt        recv;
+    ngx_recv_chain_pt  recv_chain;
+    ngx_recv_pt        udp_recv;
+    ngx_send_pt        send;
+    ngx_send_pt        udp_send;
+    ngx_send_chain_pt  udp_send_chain;
+    ngx_send_chain_pt  send_chain;
+    ngx_uint_t         flags;
+} ngx_os_io_t;
+```
+
+枚举以 _e 结尾：
+
+```
+typedef enum {
+    ngx_http_fastcgi_st_version = 0,
+    ngx_http_fastcgi_st_type,
+    ...
+    ngx_http_fastcgi_st_padding
+} ngx_http_fastcgi_state_e;
+```
+
+变量
+---------
+
+变量声明按基本类型的长度排序，然后按字母顺序排序。类型和变量名都要对齐。类型和名称列以两个空格分开。大数组放在声明块的结尾：
+
+```
+u_char                      |  | *rv, *p;
+ngx_conf_t                  |  | *cf;
+ngx_uint_t                  |  |  i, j, k;
+unsigned int                |  |  len;
+struct sockaddr             |  | *sa;
+const unsigned char         |  | *data;
+ngx_peer_connection_t       |  | *pc;
+ngx_http_core_srv_conf_t    |  |**cscfp;
+ngx_http_upstream_srv_conf_t|  | *us, *uscf;
+u_char                      |  |  text[NGX_SOCKADDR_STRLEN];
+```
+
+静态和全局变量可以在声明处初始化：
+
+```
+static ngx_str_t  ngx_http_memcached_key = ngx_string("memcached_key");
+```
+```
+static ngx_uint_t  mday[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+```
+```
+static uint32_t  ngx_crc32_table16[] = {
+    0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
+    ...
+    0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c
+};
+```
+
+以下是一些常用的类型/名称组合：
+
+```
+u_char                        *rv;
+ngx_int_t                      rc;
+ngx_conf_t                    *cf;
+ngx_connection_t              *c;
+ngx_http_request_t            *r;
+ngx_peer_connection_t         *pc;
+ngx_http_upstream_srv_conf_t  *us, *uscf;
+```
+
+函数
+---------
+
+所有的函数（包括静态）必须有原型。原型包括参数名称。较长的原型用一个缩进加连续行。
+
+```
+static char *ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static ngx_int_t ngx_http_init_phases(ngx_conf_t *cf,
+    ngx_http_core_main_conf_t *cmcf);
+
+static char *ngx_http_merge_servers(ngx_conf_t *cf,
+    ngx_http_core_main_conf_t *cmcf, ngx_http_module_t *module,
+    ngx_uint_t ctx_index);
+```
+
+定义中的函数名以新行开始。函数体的开和结束都有自己的单独行。函数体必须缩进，所以函数体在两个空行里：
+
+```
+static ngx_int_t
+ngx_http_find_virtual_server(ngx_http_request_t *r, u_char *host, size_t len)
+{
+    ...
+}
+
+
+static ngx_int_t
+ngx_http_add_addresses(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+    ngx_http_conf_port_t *port, ngx_http_listen_opt_t *lsopt)
+{
+    ...
+}
+```
+
+函数名和左括号后面都没有空格。较长的函数调用用连续行并且从第一个函数参数的起始位置开始。如果这样还不满足，第一个连续需要格式化直到第79个位置。（上面有提到最大文本宽度为80）
+
+```
+ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+               "http header: \"%V: %V\"",
+               &h->key, &h->value);
+
+hc->busy = ngx_palloc(r->connection->pool,
+                  cscf->large_client_header_buffers.num * sizeof(ngx_buf_t *));
+```
+
+内联用ngx_inline代替inline：
+
+```
+static ngx_inline void ngx_cpuid(uint32_t i, uint32_t *buf);
+```
+
+表达式
+-----------
+
+. 和 -> 以外的二进制操作符必须以一个空格分开。一元操作符和下标不能用空格分开。
+
+```
+width = width * 10 + (*fmt++ - '0');
+```
+```
+ch = (u_char) ((decoded << 4) + (ch - '0'));
+```
+```
+r->exten.data = &r->uri.data[i + 1];
+```
+
+类型转换与被操作的表达式之间有一个空格。类型里的星号与类型名也保持一个空格距离。
+
+```
+len = ngx_sock_ntop((struct sockaddr *) sin6, p, len, 1);
+```
+
+如果一个表达式不适合单行，必须做调整。打破的首选是一个二元操作符。连续行和表达式的开始位置对齐：
+
+```
+if (status == NGX_HTTP_MOVED_PERMANENTLY
+    || status == NGX_HTTP_MOVED_TEMPORARILY
+    || status == NGX_HTTP_SEE_OTHER
+    || status == NGX_HTTP_TEMPORARY_REDIRECT
+    || status == NGX_HTTP_PERMANENT_REDIRECT)
+{
+    ...
+}
+```
+
+```
+p->temp_file->warn = "an upstream response is buffered "
+                     "to a temporary file";
+```
+
+最后的手段，有可能需要将表达式处理成延续行以位置79结束。
+
+```
+hinit->hash = ngx_pcalloc(hinit->pool, sizeof(ngx_hash_wildcard_t)
+                                     + size * sizeof(ngx_hash_elt_t *));
+```
+
+以上规则也适合于子表达式，每个子表达有自己的缩进级别：
+
+```
+if (((u->conf->cache_use_stale & NGX_HTTP_UPSTREAM_FT_UPDATING)
+     || c->stale_updating) && !r->background
+    && u->conf->cache_background_update)
+{
+    ...
+}
+```
+
+有时，将表达式放在类型转换的后面，并且保持缩进。
+
+```
+node = (ngx_rbtree_node_t *)
+           ((u_char *) lr - offsetof(ngx_rbtree_node_t, color));
+```
+
+指针必须显示的跟NULL（不是0)比较。
+
+```
+if (ptr != NULL) {
+    ...
+}
+```
+
+条件和循环
+----------------------
+
+if关键字和条件以一个空格分开。{ 放在同行，或者放在单独行如果条件占了多行时。} 位于单独行，可选的接着 “else if / else”。通常在 "else if / else" 部份之前有一个空格：
+
+```
+if (node->left == sentinel) {
+    temp = node->right;
+    subst = node;
+
+} else if (node->right == sentinel) {
+    temp = node->left;
+    subst = node;
+
+} else {
+    subst = ngx_rbtree_min(node->right, sentinel);
+
+    if (subst->left != sentinel) {
+        temp = subst->left;
+
+    } else {
+        temp = subst->right;
+    }
+}
+```
+
+类似的格式规则适用于 "do" 和 "while" 循环：
+
+```
+while (p < last && *p == ' ') {
+    p++;
+}
+```
+
+```
+do {
+    ctx->node = rn;
+    ctx = ctx->next;
+} while (ctx);
+```
+
+switch 关键字和条件以一个空格分隔。{ 放在同行。} 放在单独行。case 关键字跟swith对齐排列：
+
+```
+switch (ch) {
+case '!':
+    looked = 2;
+    state = ssi_comment0_state;
+    break;
+
+case '<':
+    copy_end = p;
+    break;
+
+default:
+    copy_end = p;
+    looked = 0;
+    state = ssi_start_state;
+    break;
+}
+```
+
+大部分 for 循环如下所示：
+
+```
+for (i = 0; i < ccf->env.nelts; i++) {
+    ...
+}
+```
+
+```
+for (q = ngx_queue_head(locations);
+     q != ngx_queue_sentinel(locations);
+     q = ngx_queue_next(q))
+{
+    ...
+}
+```
+
+如果for声里有些部分是省略的，则用 /* void * 注释表示：
+
+```
+for (i = 0; /* void */ ; i++) {
+    ...
+}
+```
+
+空体的循环可以放在同一行，里面有 /* void */ 这样的注释。
+
+```
+for (cl = *busy; cl->next; cl = cl->next) { /* void */ }
+```
+
+无限循环如下所示：
+
+```
+for ( ;; ) {
+    ...
+}
+```
+
+标签
+------
+
+标签被空行包围并在上一级缩进：
+
+```
+    if (i == 0) {
+        u->err = "host not found";
+        goto failed;
+    }
+
+    u->addrs = ngx_pcalloc(pool, i * sizeof(ngx_addr_t));
+    if (u->addrs == NULL) {
+        goto failed;
+    }
+
+    u->naddrs = i;
+
+    ...
+
+    return NGX_OK;
+
+failed:
+
+    freeaddrinfo(res);
+    return NGX_ERROR;
+```
