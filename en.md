@@ -57,6 +57,18 @@ Development guide
     * [Building filter modules](#building-filter-modules)
     * [Buffer reuse](#buffer-reuse)
     * [Load balancing](#load-balancing)
+* [Examples](#examples)
+* [Code style](#code-style)
+    * [General rules](#general-rules)
+    * [Files](#files)
+    * [Comments](#comments)
+    * [Preprocessor](#preprocessor)
+    * [Types](#types)
+    * [Variables](#variables)
+    * [Functions](#functions)
+    * [Expressions](#expressions)
+    * [Conditionals and Loops](#conditionals-and-loops)
+    * [Labels](#labels)
     
 Introduction
 ============
@@ -1589,7 +1601,7 @@ The array should be terminated by a special value “ngx_null_command”. The na
 
 Directive types:
 
-* NGX_CONF_BLOCK — the directive is a block, i.e. it may contain other directives in curly braces, or even implement its own parser to handle contents inside.
+* NGX_CONF_BLOCK — the directive is a block, i.e. it may contain other directives in braces, or even implement its own parser to handle contents inside.
 * NGX_CONF_FLAG — the directive value is a flag, a boolean value represented by “on” or “off” strings.
 
 Context of a directive defines where in the configuration it may appear and how to access module context to store corresponding values:
@@ -2960,3 +2972,527 @@ All methods accept at least two arguments: peer connection object pc and the dat
 * free(pc, data, state) — the method is called when an upstream module has finished work with a particular server. The state argument is the status of upstream connection completion. This is a bitmask, the following values may be set: NGX_PEER_FAILED — this attempt is considered unsuccessful, NGX_PEER_NEXT — a special case with codes 403 and 404 (see link above), which are not considered a failure. NGX_PEER_KEEPALIVE. Also, tries counter is decremented by this method.
 * notify(pc, data, type) — currently unused in the OSS version.
 * set_session(pc, data) and save_session(pc, data) — SSL-specific methods that allow to cache sessions to upstream servers. The implementation is provided by the round-robin balancing method.
+
+Examples
+========
+
+The [nginx-dev-examples](http://hg.nginx.org/nginx-dev-examples) repository provides nginx module examples.
+
+Code Style
+==========
+
+General rules
+------------------
+
+* maximum text width is 80 characters
+* indentation is 4 spaces
+* no tabs, no trailing spaces
+* list elements on the same line are separated with spaces
+* hexadecimal literals are lowercase
+* file names, function and type names, and global variables have the ngx_ or more specific prefix such as ngx_http_ and ngx_mail_
+
+```
+size_t
+ngx_utf8_length(u_char *p, size_t n)
+{
+    u_char  c, *last;
+    size_t  len;
+
+    last = p + n;
+
+    for (len = 0; p < last; len++) {
+
+        c = *p;
+
+        if (c < 0x80) {
+            p++;
+            continue;
+        }
+
+        if (ngx_utf8_decode(&p, n) > 0x10ffff) {
+            /* invalid UTF-8 */
+            return n;
+        }
+    }
+
+    return len;
+}
+```
+
+Files
+------
+
+A typical source file may contain the following sections separated by two empty lines:
+
+* copyright statements
+* includes
+* preprocessor definitions
+* type definitions
+* function prototypes
+* variable definitions
+* function definitions
+
+Copyright statements look like this:
+
+```
+/*
+ * Copyright (C) Author Name
+ * Copyright (C) Organization, Inc.
+ */
+```
+
+If the file is modified significantly, the list of authors should be updated, the new author is added to the top.
+
+The ngx_config.h and ngx_core.h files are always included first, followed by one of ngx_http.h, ngx_stream.h, or ngx_mail.h. Then follow optional external header files:
+
+```
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxslt/xslt.h>
+
+#if (NGX_HAVE_EXSLT)
+#include <libexslt/exslt.h>
+#endif
+```
+
+Header files should include the so called "header protection":
+
+```
+#ifndef _NGX_PROCESS_CYCLE_H_INCLUDED_
+#define _NGX_PROCESS_CYCLE_H_INCLUDED_
+...
+#endif /* _NGX_PROCESS_CYCLE_H_INCLUDED_ */
+```
+
+Comments
+---------
+
+* “//” comments are not used
+* text is written in English, American spelling is preferred
+* multi-line comments are formatted like this:
+
+```
+/*
+ * The red-black tree code is based on the algorithm described in
+ * the "Introduction to Algorithms" by Cormen, Leiserson and Rivest.
+ */
+/* find the server configuration for the address:port */
+```
+
+Preprocessor
+------------
+
+Macro names start from ngx_ or NGX_ (or more specific) prefix. Macro names for constants are uppercase. Parameterized macros and macros for initializers are lowercase. The macro name and value are separated by at least two spaces:
+
+```
+#define NGX_CONF_BUFFER  4096
+
+#define ngx_buf_in_memory(b)  (b->temporary || b->memory || b->mmap)
+
+#define ngx_buf_size(b)                                                      \
+    (ngx_buf_in_memory(b) ? (off_t) (b->last - b->pos):                      \
+                            (b->file_last - b->file_pos))
+
+#define ngx_null_string  { 0, NULL }
+```
+
+Conditions are inside parentheses, negation is outside:
+
+```
+#if (NGX_HAVE_KQUEUE)
+...
+#elif ((NGX_HAVE_DEVPOLL && !(NGX_TEST_BUILD_DEVPOLL)) \
+       || (NGX_HAVE_EVENTPORT && !(NGX_TEST_BUILD_EVENTPORT)))
+...
+#elif (NGX_HAVE_EPOLL && !(NGX_TEST_BUILD_EPOLL))
+...
+#elif (NGX_HAVE_POLL)
+...
+#else /* select */
+...
+#endif /* NGX_HAVE_KQUEUE */
+```
+
+Types
+------
+
+Type names end with the “_t” suffix. A defined type name is separated by at least two spaces:
+
+```
+typedef ngx_uint_t  ngx_rbtree_key_t;
+```
+
+Structure types are defined using typedef. Inside structures, member types and names are aligned:
+
+```
+typedef struct {
+    size_t      len;
+    u_char     *data;
+} ngx_str_t;
+```
+
+Keep alignment identical among different structures in the file. A structure that points to itself has the name, ending with “_s”. Adjacent structure definitions are separated with two empty lines:
+
+```
+typedef struct ngx_list_part_s  ngx_list_part_t;
+
+struct ngx_list_part_s {
+    void             *elts;
+    ngx_uint_t        nelts;
+    ngx_list_part_t  *next;
+};
+
+
+typedef struct {
+    ngx_list_part_t  *last;
+    ngx_list_part_t   part;
+    size_t            size;
+    ngx_uint_t        nalloc;
+    ngx_pool_t       *pool;
+} ngx_list_t;
+```
+
+Each structure member is declared on its own line:
+
+```
+typedef struct {
+    ngx_uint_t        hash;
+    ngx_str_t         key;
+    ngx_str_t         value;
+    u_char           *lowcase_key;
+} ngx_table_elt_t;
+```
+
+Function pointers inside structures have defined types ending with “_pt”:
+
+```
+typedef ssize_t (*ngx_recv_pt)(ngx_connection_t *c, u_char *buf, size_t size);
+typedef ssize_t (*ngx_recv_chain_pt)(ngx_connection_t *c, ngx_chain_t *in,
+    off_t limit);
+typedef ssize_t (*ngx_send_pt)(ngx_connection_t *c, u_char *buf, size_t size);
+typedef ngx_chain_t *(*ngx_send_chain_pt)(ngx_connection_t *c, ngx_chain_t *in,
+    off_t limit);
+
+typedef struct {
+    ngx_recv_pt        recv;
+    ngx_recv_chain_pt  recv_chain;
+    ngx_recv_pt        udp_recv;
+    ngx_send_pt        send;
+    ngx_send_pt        udp_send;
+    ngx_send_chain_pt  udp_send_chain;
+    ngx_send_chain_pt  send_chain;
+    ngx_uint_t         flags;
+} ngx_os_io_t;
+```
+
+Enumerations have types ending with “_e”:
+
+```
+typedef enum {
+    ngx_http_fastcgi_st_version = 0,
+    ngx_http_fastcgi_st_type,
+    ...
+    ngx_http_fastcgi_st_padding
+} ngx_http_fastcgi_state_e;
+```
+
+Variables
+---------
+
+Variables are declared sorted by length of a base type, then alphabetically. Type names and variable names are aligned. The type and name “columns” are separated with two spaces. Large arrays are put at the end of a declaration block:
+
+```
+u_char                      |  | *rv, *p;
+ngx_conf_t                  |  | *cf;
+ngx_uint_t                  |  |  i, j, k;
+unsigned int                |  |  len;
+struct sockaddr             |  | *sa;
+const unsigned char         |  | *data;
+ngx_peer_connection_t       |  | *pc;
+ngx_http_core_srv_conf_t    |  |**cscfp;
+ngx_http_upstream_srv_conf_t|  | *us, *uscf;
+u_char                      |  |  text[NGX_SOCKADDR_STRLEN];
+```
+
+Static and global variables may be initialized on declaration:
+
+```
+static ngx_str_t  ngx_http_memcached_key = ngx_string("memcached_key");
+```
+```
+static ngx_uint_t  mday[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+```
+```
+static uint32_t  ngx_crc32_table16[] = {
+    0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
+    ...
+    0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c
+};
+```
+
+There is a bunch of commonly used type/name combinations:
+
+```
+u_char                        *rv;
+ngx_int_t                      rc;
+ngx_conf_t                    *cf;
+ngx_connection_t              *c;
+ngx_http_request_t            *r;
+ngx_peer_connection_t         *pc;
+ngx_http_upstream_srv_conf_t  *us, *uscf;
+```
+
+Functions
+---------
+
+All functions (even static ones) should have prototypes. Prototypes include argument names. Long prototypes are wrapped with a single indentation on continuation lines:
+
+```
+static char *ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static ngx_int_t ngx_http_init_phases(ngx_conf_t *cf,
+    ngx_http_core_main_conf_t *cmcf);
+
+static char *ngx_http_merge_servers(ngx_conf_t *cf,
+    ngx_http_core_main_conf_t *cmcf, ngx_http_module_t *module,
+    ngx_uint_t ctx_index);
+```
+
+The function name in a definition starts with a new line. The function body opening and closing braces are on separate lines. The body of a function is indented. There are two empty lines between functions:
+
+```
+static ngx_int_t
+ngx_http_find_virtual_server(ngx_http_request_t *r, u_char *host, size_t len)
+{
+    ...
+}
+
+
+static ngx_int_t
+ngx_http_add_addresses(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+    ngx_http_conf_port_t *port, ngx_http_listen_opt_t *lsopt)
+{
+    ...
+}
+```
+
+There is no space after the function name and opening parenthesis. Long function calls are wrapped such that continuation lines start from the position of the first function argument. If this is impossible, format the first continuation line such that it ends at position 79:
+
+```
+ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+               "http header: \"%V: %V\"",
+               &h->key, &h->value);
+
+hc->busy = ngx_palloc(r->connection->pool,
+                  cscf->large_client_header_buffers.num * sizeof(ngx_buf_t *));
+```
+
+The ngx_inline macro should be used instead of inline:
+
+```
+static ngx_inline void ngx_cpuid(uint32_t i, uint32_t *buf);
+```
+
+Expressions
+-----------
+
+Binary operators except “.” and “−>” should be separated from their operands by one space. Unary operators and subscripts are not separated from their operands by spaces:
+
+```
+width = width * 10 + (*fmt++ - '0');
+```
+```
+ch = (u_char) ((decoded << 4) + (ch - '0'));
+```
+```
+r->exten.data = &r->uri.data[i + 1];
+```
+
+Type casts are separated by one space from casted expressions. An asterisk inside type cast is separated with space from type name:
+
+```
+len = ngx_sock_ntop((struct sockaddr *) sin6, p, len, 1);
+```
+
+If an expression does not fit into single line, it is wrapped. The preferred point to break a line is a binary operator. The continuation line is lined up with the start of expression:
+
+```
+if (status == NGX_HTTP_MOVED_PERMANENTLY
+    || status == NGX_HTTP_MOVED_TEMPORARILY
+    || status == NGX_HTTP_SEE_OTHER
+    || status == NGX_HTTP_TEMPORARY_REDIRECT
+    || status == NGX_HTTP_PERMANENT_REDIRECT)
+{
+    ...
+}
+```
+
+```
+p->temp_file->warn = "an upstream response is buffered "
+                     "to a temporary file";
+```
+
+As a last resort, it is possible to wrap an expression so that the continuation line ends at position 79:
+
+```
+hinit->hash = ngx_pcalloc(hinit->pool, sizeof(ngx_hash_wildcard_t)
+                                     + size * sizeof(ngx_hash_elt_t *));
+```
+
+The above rules also apply to sub-expressions, where each sub-expression has its own indentation level:
+
+```
+if (((u->conf->cache_use_stale & NGX_HTTP_UPSTREAM_FT_UPDATING)
+     || c->stale_updating) && !r->background
+    && u->conf->cache_background_update)
+{
+    ...
+}
+```
+
+Sometimes, it is convenient to wrap an expression after a cast. In this case, the continuation line is indented:
+
+```
+node = (ngx_rbtree_node_t *)
+           ((u_char *) lr - offsetof(ngx_rbtree_node_t, color));
+```
+
+Pointers are explicitly compared to NULL (not 0):
+
+```
+if (ptr != NULL) {
+    ...
+}
+```
+
+Conditionals and Loops
+----------------------
+
+The “if” keyword is separated from the condition by one space. Opening brace is located on the same line, or on a dedicated line if the condition takes several lines. Closing brace is located on a dedicated line, optionally followed by “else if / else”. Usually, there is an empty line before the “else if / else” part:
+
+```
+if (node->left == sentinel) {
+    temp = node->right;
+    subst = node;
+
+} else if (node->right == sentinel) {
+    temp = node->left;
+    subst = node;
+
+} else {
+    subst = ngx_rbtree_min(node->right, sentinel);
+
+    if (subst->left != sentinel) {
+        temp = subst->left;
+
+    } else {
+        temp = subst->right;
+    }
+}
+```
+
+Similar formatting rules are applied to “do” and “while” loops:
+
+```
+while (p < last && *p == ' ') {
+    p++;
+}
+```
+
+```
+do {
+    ctx->node = rn;
+    ctx = ctx->next;
+} while (ctx);
+```
+
+The “switch” keyword is separated from the condition by one space. Opening brace is located on the same line. Closing brace is located on a dedicated line. The “case” keywords are lined up with “switch”:
+
+```
+switch (ch) {
+case '!':
+    looked = 2;
+    state = ssi_comment0_state;
+    break;
+
+case '<':
+    copy_end = p;
+    break;
+
+default:
+    copy_end = p;
+    looked = 0;
+    state = ssi_start_state;
+    break;
+}
+```
+
+Most “for” loops are formatted like this:
+
+```
+for (i = 0; i < ccf->env.nelts; i++) {
+    ...
+}
+```
+
+```
+for (q = ngx_queue_head(locations);
+     q != ngx_queue_sentinel(locations);
+     q = ngx_queue_next(q))
+{
+    ...
+}
+```
+
+If some part of the “for” statement is omitted, this is indicated by the “/* void */” comment:
+
+```
+for (i = 0; /* void */ ; i++) {
+    ...
+}
+```
+
+A loop with an empty body is also indicated by the “/* void */” comment which may be put on the same line:
+
+```
+for (cl = *busy; cl->next; cl = cl->next) { /* void */ }
+```
+
+An endless loop looks like this:
+
+```
+for ( ;; ) {
+    ...
+}
+```
+
+Labels
+------
+
+Labels are surrounded with empty lines and are indented at the previous level:
+
+```
+    if (i == 0) {
+        u->err = "host not found";
+        goto failed;
+    }
+
+    u->addrs = ngx_pcalloc(pool, i * sizeof(ngx_addr_t));
+    if (u->addrs == NULL) {
+        goto failed;
+    }
+
+    u->naddrs = i;
+
+    ...
+
+    return NGX_OK;
+
+failed:
+
+    freeaddrinfo(res);
+    return NGX_ERROR;
+```
